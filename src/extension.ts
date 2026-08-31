@@ -25,6 +25,61 @@ async function getLatestCommitMessage(): Promise<string | undefined> {
 }
 
 
+async function generateAiPostDraft(
+	reflection: string,
+	latestCommitMessage?: string,
+): Promise<string | undefined> {
+	const [model] = await vscode.lm.selectChatModels({
+		vendor: 'copilot',
+	});
+
+	if (!model) {
+		vscode.window.showErrorMessage('No AI model available for generating the post draft.');
+		return undefined;
+	}
+
+	const selectedContext = latestCommitMessage
+		? `Latest commit:\n${latestCommitMessage}\n\nReflection:\n${reflection}`
+		: `Reflection:\n${reflection}`;
+
+	const messages = [
+		vscode.LanguageModelChatMessage.User(
+			[
+				'Write a thoughtful Linkedin post for a developer building in public.',
+				'Only use the facts in the provided context. Do not make up any facts.',
+				'Make it personal, concise, authentic and natural.',
+				'Focus on what the developer learned, or why the work mattered.',
+				'Return only the post text. Do not add a title, commentary, or Markdown code fence.',
+				'Use at most three relevant hashtags.',
+				'',
+				selectedContext,
+
+			].join('\n'),
+		),
+	];
+
+	const cancelllation = new vscode.CancellationTokenSource();
+
+	try {
+		const response = await model.sendRequest(
+			messages,
+			{},
+		cancelllation.token,
+		);
+
+		let draft = '';
+
+		for await (const fragment of response.text) {
+			draft += fragment;
+	}
+
+	return draft.trim() || undefined;
+} finally {
+	cancelllation.dispose();
+}
+
+}
+
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -108,17 +163,44 @@ export function activate(context: vscode.ExtensionContext) {
 			contextChoice.id === 'latestCommit'
 			? await getLatestCommitMessage()
 			: undefined;
-			const draft = [
+
+			const fallbackDraft = [
 				latestCommitMessage
-					? `Today I worked on ${latestCommitMessage}`
-				: 'Today I learned something while building.',
+				? `Today I worked on ${latestCommitMessage}`
+				: 'Today I learned something while building:',
 				'',
 				reflection,
 				'',
-				'Small lesson but one I will carry into the next thing I build.',
-				'',
-				'#buildinpublic #100DaysOfCode #CodeLore #devlife',
+				'#buildinpublic #devjourney #CodeLore',
 			].join('\n');
+
+			let draft = fallbackDraft;
+
+			try {
+				const aiDraft = await vscode.window.withProgress(
+					{
+						location: vscode.ProgressLocation.Notification,
+						title: 'CodeLore is writing your draft...',
+					},
+					() => generateAiPostDraft(reflection, latestCommitMessage),
+				);
+
+				if (aiDraft) {
+					draft = aiDraft;
+				} else {
+					vscode.window.showInformationMessage(
+						'Copilot is unavailable, so CodeLore used a simple draft instead.',
+					);
+				};
+
+			} catch (error) {
+				console.error('Error generating CodeLore draft:', error)
+
+
+			vscode.window.showInformationMessage(
+				'CodeLore used a simple draft because Copilot couldnt respond.',
+			);
+		}
 
 			const document = await vscode.workspace.openTextDocument({
 				content: draft,
