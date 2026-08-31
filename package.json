@@ -20,6 +20,10 @@
       {
         "command": "codelore.viewLatestReflection",
         "title": "CodeLore: View Latest Reflection"
+      },
+      {
+        "command": "codelore.draftPostFromLatestReflection",
+        "title": "CodeLore: Draft Post from Latest Reflection"
       }
     ]
   },

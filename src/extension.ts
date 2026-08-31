@@ -29,7 +29,6 @@ export function activate(context: vscode.ExtensionContext) {
 			await context.workspaceState.update('codelore.latestReflection', reflection.trim());
 
 			vscode.window.showInformationMessage('Your reflection has been saved. Nice work!');
-
 		},
 	);
 
@@ -47,7 +46,44 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	);
 
-	context.subscriptions.push(disposable, viewLatestReflection);
+	const draftPostFromLatestReflection = vscode.commands.registerCommand(
+		'codelore.draftPostFromLatestReflection',
+		async () => {
+			const reflection = context.workspaceState.get<string>('codelore.latestReflection');
+
+			if (!reflection) {
+				vscode.window.showInformationMessage(
+					'Add a reflection before drafting a post.',
+				);
+				return;
+			}
+
+			const draft = [
+				'Today I learned something while building:',
+				'',
+				reflection,
+				'',
+				'Small lesson but one I will carry into the next thing I build.',
+				'',
+				'#buildinpublic #100DaysOfCode #CodeLore #devlife',
+			].join('\n');
+
+			const document = await vscode.workspace.openTextDocument({
+				content: draft,
+				language: 'markdown',
+			});
+
+			await vscode.window.showTextDocument(document, {
+				preview: false,
+			});
+		},
+	);
+
+	context.subscriptions.push(
+		disposable,
+		viewLatestReflection,
+		draftPostFromLatestReflection,
+	);
 }
 
 // This method is called when your extension is deactivated
