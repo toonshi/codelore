@@ -14,8 +14,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "codelore.helloWorld",
-        "title": "Hello World"
+        "command": "codelore.reflectOnToday",
+        "title": "CodeLore: Reflect on Today"
       }
     ]
   },
