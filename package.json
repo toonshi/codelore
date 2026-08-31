@@ -29,7 +29,24 @@
         "command": "codelore.copyLatestDraft",
         "title": "CodeLore: Copy Latest Draft"
       }
-    ]
+    ],
+    "viewsContainers": {
+  "activitybar": [
+    {
+      "id": "codelore",
+      "title": "CodeLore",
+      "icon": "resources/codelore.svg"
+    }
+  ]
+},
+"views": {
+  "codelore": [
+    {
+      "id": "codelore.today",
+      "name": "Today"
+    }
+  ]
+}
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

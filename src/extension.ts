@@ -87,9 +87,69 @@ async function generateAiPostDraft(
 }
 
 
+class CodeLoreViewProvider
+	implements vscode.TreeDataProvider<vscode.TreeItem>
+{
+	getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
+		return element;
+	}
+
+	getChildren(): vscode.TreeItem[] {
+		return [
+			this.createAction(
+				'Reflect on Today',
+				'codelore.reflectOnToday',
+				'comment',
+			),
+			this.createAction(
+				'Draft Post',
+				'codelore.draftPostFromLatestReflection',
+				'megaphone',
+			),
+			this.createAction(
+				'View Latest Reflection',
+				'codelore.viewLatestReflection',
+				'note',
+			),
+			this.createAction(
+				'Copy Latest Draft',
+				'codelore.copyLatestDraft',
+				'copy',
+			),
+		];
+	}
+
+	private createAction(
+		label: string,
+		command: string,
+		icon: string,
+	): vscode.TreeItem {
+		const item = new vscode.TreeItem(label);
+
+		item.command = {
+			command,
+			title: label,
+		};
+
+		item.iconPath = new vscode.ThemeIcon(icon);
+
+		return item;
+	}
+}
+
+
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
+
+	const codeloreViewProvider = new CodeLoreViewProvider();
+
+	context.subscriptions.push(
+	vscode.window.registerTreeDataProvider(
+		'codelore.today',
+		codeloreViewProvider,
+	),
+);
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
