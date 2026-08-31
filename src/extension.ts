@@ -82,10 +82,35 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			const latestCommitMessage = await getLatestCommitMessage();
+
+			const contextChoice = await vscode.window.showQuickPick(
+				[
+					{
+						label: 'Reflection only',
+						description: 'Draft from your words only',
+						id: 'reflection',
+					},
+					{
+						label: 'Reflection + latest commit',
+						description: 'Include the latest commit message',
+						id: 'latestCommit',
+					},
+				],
+				{
+					placeHolder: 'What should CodeLore use for this draft?',
+				},
+			);
+			if (!contextChoice) {
+				return;
+			}
+
+			const latestCommitMessage =
+			contextChoice.id === 'latestCommit'
+			? await getLatestCommitMessage()
+			: undefined;
 			const draft = [
 				latestCommitMessage
-					? `Today I learned something while building: ${latestCommitMessage}`
+					? `Today I worked on ${latestCommitMessage}`
 				: 'Today I learned something while building.',
 				'',
 				reflection,
