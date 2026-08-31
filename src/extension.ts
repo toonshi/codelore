@@ -1,6 +1,30 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
+
 import * as vscode from 'vscode';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+
+const execFileAsync = promisify(execFile);
+
+
+async function getLatestCommitMessage(): Promise<string | undefined> {
+	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+
+	if (!workspaceFolder) {
+		return undefined;
+	}
+
+	try {
+		const {stdout} = await execFileAsync('git', ['log', '-1', '--pretty=%B'], {
+			cwd: workspaceFolder.uri.fsPath,
+		});
+		return stdout.trim() || undefined;
+	} catch (error) {
+		console.error('Error fetching latest commit message:', error);
+		return undefined;
+	}
+}
+
+
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -58,8 +82,11 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
+			const latestCommitMessage = await getLatestCommitMessage();
 			const draft = [
-				'Today I learned something while building:',
+				latestCommitMessage
+					? `Today I learned something while building: ${latestCommitMessage}`
+				: 'Today I learned something while building.',
 				'',
 				reflection,
 				'',
