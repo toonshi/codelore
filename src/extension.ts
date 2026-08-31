@@ -131,6 +131,25 @@ export function activate(context: vscode.ExtensionContext) {
 		},
 	);
 
+
+	const copyLatestDraft = vscode.commands.registerCommand(
+		'codelore.copyLatestDraft',
+		async () => {
+			const draft = context.workspaceState.get<string>('codelore.latestDraft');
+
+			if (!draft) {
+				vscode.window.showInformationMessage('Create a draft before copying one.');
+				return;
+			}
+
+			await vscode.env.clipboard.writeText(draft);
+
+			vscode.window.showInformationMessage(
+				'Latest draft copied to clipboard.',
+			);
+		},
+	);
+
 	const draftPostFromLatestReflection = vscode.commands.registerCommand(
 		'codelore.draftPostFromLatestReflection',
 		async () => {
@@ -234,6 +253,9 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 		}
 
+
+			await context.workspaceState.update('codelore.latestDraft', draft);
+
 			const document = await vscode.workspace.openTextDocument({
 				content: draft,
 				language: 'markdown',
@@ -249,6 +271,7 @@ export function activate(context: vscode.ExtensionContext) {
 		disposable,
 		viewLatestReflection,
 		draftPostFromLatestReflection,
+		copyLatestDraft
 	);
 }
 

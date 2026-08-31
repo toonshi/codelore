@@ -24,6 +24,10 @@
       {
         "command": "codelore.draftPostFromLatestReflection",
         "title": "CodeLore: Draft Post from Latest Reflection"
+      },
+      {
+        "command": "codelore.copyLatestDraft",
+        "title": "CodeLore: Copy Latest Draft"
       }
     ]
   },
