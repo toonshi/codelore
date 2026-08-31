@@ -27,6 +27,7 @@ async function getLatestCommitMessage(): Promise<string | undefined> {
 
 async function generateAiPostDraft(
 	reflection: string,
+	platform: 'linkedin' | 'x',
 	latestCommitMessage?: string,
 ): Promise<string | undefined> {
 	const [model] = await vscode.lm.selectChatModels({
@@ -42,10 +43,15 @@ async function generateAiPostDraft(
 		? `Latest commit:\n${latestCommitMessage}\n\nReflection:\n${reflection}`
 		: `Reflection:\n${reflection}`;
 
+
+	const platformInstructions =
+	     platform === 'x'
+		 ? 'Write one X post under 280 characters. Make it sharp and direct.'
+		 : 'Write a Linkedin post between 100 and 180 words. Make it thoughtful and easy to read.';
 	const messages = [
 		vscode.LanguageModelChatMessage.User(
 			[
-				'Write a thoughtful Linkedin post for a developer building in public.',
+				platformInstructions,
 				'Only use the facts in the provided context. Do not make up any facts.',
 				'Make it personal, concise, authentic and natural.',
 				'Focus on what the developer learned, or why the work mattered.',
@@ -159,6 +165,32 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
+			const platformChoice = await vscode.window.showQuickPick(
+				[
+					{
+						label: 'LinkedIn',
+						description: 'Thoughtful, professional, and concise',
+						id: 'linkedin',
+					},
+					{
+						label: 'X',
+						description: 'Short, punchy, and engaging',
+						id: 'x',
+					},
+
+				],
+				{
+					placeHolder: 'Where are you sharing this?',
+				},
+
+			);
+
+			if (!platformChoice) {
+				return;
+			}
+
+			const platform = platformChoice.id === 'x' ? 'x': 'linkedin';
+
 			const latestCommitMessage =
 			contextChoice.id === 'latestCommit'
 			? await getLatestCommitMessage()
@@ -182,7 +214,7 @@ export function activate(context: vscode.ExtensionContext) {
 						location: vscode.ProgressLocation.Notification,
 						title: 'CodeLore is writing your draft...',
 					},
-					() => generateAiPostDraft(reflection, latestCommitMessage),
+					() => generateAiPostDraft(reflection, platform, latestCommitMessage),
 				);
 
 				if (aiDraft) {
