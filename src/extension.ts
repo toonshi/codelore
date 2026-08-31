@@ -13,13 +13,41 @@ export function activate(context: vscode.ExtensionContext) {
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
-	const disposable = vscode.commands.registerCommand('codelore.reflectOnToday', () => {
-		// The code you place here will be executed every time your command is executed
-		// Display a message box to the user
-		vscode.window.showInformationMessage('CodeLore: Reflect on today');
-	});
+	const disposable = vscode.commands.registerCommand(
+		'codelore.reflectOnToday',
+		async () => {
+			const reflection = await vscode.window.showInputBox({
+				prompt: 'What did you learn, build or get unstuck today?',
+				placeHolder: 'I learned how to use the VS Code API to create an extension!',
+				ignoreFocusOut: true,
+			});
 
-	context.subscriptions.push(disposable);
+			if (!reflection?.trim()) {
+				return;
+			}
+
+			await context.workspaceState.update('codelore.latestReflection', reflection.trim());
+
+			vscode.window.showInformationMessage('Your reflection has been saved. Nice work!');
+
+		},
+	);
+
+	const viewLatestReflection = vscode.commands.registerCommand(
+		'codelore.viewLatestReflection',
+		async () => {
+			const reflection = context.workspaceState.get<string>('codelore.latestReflection');
+
+			if (!reflection) {
+				vscode.window.showInformationMessage('No reflection yet. Start with CodeLore: Reflect on Today.');
+				return;
+			}
+
+			vscode.window.showInformationMessage(`Your latest reflection: ${reflection}`);
+		},
+	);
+
+	context.subscriptions.push(disposable, viewLatestReflection);
 }
 
 // This method is called when your extension is deactivated

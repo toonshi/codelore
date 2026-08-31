@@ -16,6 +16,10 @@
       {
         "command": "codelore.reflectOnToday",
         "title": "CodeLore: Reflect on Today"
+      },
+      {
+        "command": "codelore.viewLatestReflection",
+        "title": "CodeLore: View Latest Reflection"
       }
     ]
   },
