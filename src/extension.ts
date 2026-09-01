@@ -135,7 +135,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			if (message.command === 'openWorkspace') {
+			if (message.command === 'openWorkspace' || message.command === 'newPost') {
 				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
 			}
 		});
@@ -172,6 +172,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}';">
 <style>
 	body { color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: 13px; margin: 0; padding: 16px; }
+	.sidebar-shell { display: flex; flex-direction: column; min-height: calc(100vh - 32px); }
 	h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
 	.subtitle, .muted { color: var(--vscode-descriptionForeground); line-height: 1.45; margin: 0; }
 	.section { font-size: 11px; font-weight: 600; letter-spacing: .04em; margin: 24px 0 8px; text-transform: uppercase; }
@@ -186,42 +187,46 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	button:disabled { cursor: default; opacity: .55; }
 	.actions { display: grid; gap: 6px; }
 	.actions button { margin: 0; text-align: left; }
+	.new-post { margin: 18px 0 0; text-align: left; }
+	.history-empty { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; padding: 10px 4px; }
+	.accounts { margin-top: auto; padding-top: 24px; }
 	.privacy { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; margin-top: 24px; }
 </style>
 </head>
-<body>
+<body><div class="sidebar-shell">
 	<h1>CodeLore</h1>
 	<p class="subtitle">Turn today’s work into a story worth sharing.</p>
+	<button class="new-post" data-command="newPost">+ New post</button>
 
-	<p class="section">Publishing</p>
-	<div class="card">
-		<div class="card-top">
-			<div class="mark" id="linkedin-mark">in</div>
-			<div>
-				<div class="card-title" id="linkedin-title">LinkedIn</div>
-				<div class="card-copy" id="linkedin-copy">Share your work with your network.</div>
+	<p class="section">Posts</p>
+	<div class="history-empty">Your draft history will appear here.</div>
+
+	<div class="accounts">
+		<p class="section">Accounts</p>
+		<div class="card">
+			<div class="card-top">
+				<div class="mark" id="linkedin-mark">in</div>
+				<div>
+					<div class="card-title" id="linkedin-title">LinkedIn</div>
+					<div class="card-copy" id="linkedin-copy">Share your work with your network.</div>
+				</div>
 			</div>
+			<button id="linkedin-button">Connect LinkedIn</button>
 		</div>
-		<button id="linkedin-button">Connect LinkedIn</button>
-	</div>
 
-	<div class="card">
-		<div class="card-top">
-			<div class="mark">X</div>
-			<div>
-				<div class="card-title">X</div>
-				<div class="card-copy">Short updates are coming soon.</div>
+		<div class="card">
+			<div class="card-top">
+				<div class="mark">X</div>
+				<div>
+					<div class="card-title">X</div>
+					<div class="card-copy">Short updates are coming soon.</div>
+				</div>
 			</div>
+			<button disabled>Coming soon</button>
 		</div>
-		<button disabled>Coming soon</button>
+		<p class="privacy">Your work stays local until you choose to publish.</p>
 	</div>
-
-	<p class="section">Create</p>
-	<div class="actions">
-		<button data-command="openWorkspace">Open CodeLore</button>
-	</div>
-
-	<p class="privacy">Your work stays local until you choose to publish.</p>
+</div>
 
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
