@@ -13,6 +13,68 @@ type LinkedInStatus = {
 	pictureUrl?: string | null;
 };
 
+type CodeLorePost = {
+	id: string;
+	insight: string;
+	draft: string;
+	createdAt: number;
+	updatedAt: number;
+};
+
+const postsKey = 'codelore.posts';
+const activePostKey = 'codelore.activePostId';
+
+async function getPosts(context: vscode.ExtensionContext): Promise<CodeLorePost[]> {
+	const savedPosts = context.workspaceState.get<CodeLorePost[]>(postsKey);
+	if (savedPosts) return savedPosts;
+
+	const insight = context.workspaceState.get<string>('codelore.latestReflection') ?? '';
+	const draft = context.workspaceState.get<string>('codelore.latestDraft') ?? '';
+	if (!insight && !draft) return [];
+
+	const now = Date.now();
+	const migratedPost = {id: randomUUID(), insight, draft, createdAt: now, updatedAt: now};
+	await context.workspaceState.update(postsKey, [migratedPost]);
+	await context.workspaceState.update(activePostKey, migratedPost.id);
+	return [migratedPost];
+}
+
+function postTitle(post: CodeLorePost): string {
+	const text = (post.draft || post.insight).replaceAll(/\s+/g, ' ').trim();
+	return text.length > 44 ? `${text.slice(0, 44)}…` : text || 'Untitled post';
+}
+
+async function createPost(context: vscode.ExtensionContext): Promise<CodeLorePost> {
+	const now = Date.now();
+	const post = {id: randomUUID(), insight: '', draft: '', createdAt: now, updatedAt: now};
+	const posts = await getPosts(context);
+	await context.workspaceState.update(postsKey, [post, ...posts]);
+	await context.workspaceState.update(activePostKey, post.id);
+	return post;
+}
+
+async function getActivePost(context: vscode.ExtensionContext): Promise<CodeLorePost> {
+	const posts = await getPosts(context);
+	const activeId = context.workspaceState.get<string>(activePostKey);
+	const activePost = posts.find((post) => post.id === activeId);
+	if (activePost) return activePost;
+	if (posts[0]) {
+		await context.workspaceState.update(activePostKey, posts[0].id);
+		return posts[0];
+	}
+	return createPost(context);
+}
+
+async function updateActivePost(context: vscode.ExtensionContext, changes: Partial<CodeLorePost>): Promise<CodeLorePost> {
+	const active = await getActivePost(context);
+	const updated = {...active, ...changes, updatedAt: Date.now()};
+	const posts = await getPosts(context);
+	await context.workspaceState.update(postsKey, posts.map((post) => post.id === updated.id ? updated : post));
+	await context.workspaceState.update('codelore.latestReflection', updated.insight);
+	await context.workspaceState.update('codelore.latestDraft', updated.draft);
+	return updated;
+}
+
 async function getLinkedInStatus(connectionId: string): Promise<LinkedInStatus> {
 	const response = await fetch(
 		`${apiBaseUrl}/auth/linkedin/status?connection_id=${encodeURIComponent(connectionId)}`,
@@ -135,7 +197,14 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			if (message.command === 'openWorkspace' || message.command === 'newPost') {
+			if (message.command === 'newPost') {
+				await createPost(this.context);
+				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
+				await this.refresh();
+				return;
+			}
+
+			if (message.command === 'openWorkspace') {
 				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
 			}
 		});
@@ -149,6 +218,8 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 		}
 
 		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+		const posts = await getPosts(this.context);
+		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({title: postTitle(post), updatedAt: post.updatedAt}))});
 
 		try {
 			const status = connectionId
@@ -199,7 +270,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	<button class="new-post" data-command="newPost">+ New post</button>
 
 	<p class="section">Posts</p>
-	<div class="history-empty">Your draft history will appear here.</div>
+	<div class="history-empty" id="history">Your draft history will appear here.</div>
 
 	<div class="accounts">
 		<p class="section">Accounts</p>
@@ -234,6 +305,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	const title = document.getElementById('linkedin-title');
 	const copy = document.getElementById('linkedin-copy');
 	const mark = document.getElementById('linkedin-mark');
+	const history = document.getElementById('history');
 
 	button.addEventListener('click', () => vscode.postMessage({command: 'connectLinkedIn'}));
 	document.querySelectorAll('[data-command]').forEach((item) => {
@@ -242,6 +314,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 	window.addEventListener('message', (event) => {
 		const message = event.data;
+		if (message.type === 'posts') { history.replaceChildren(); if (!message.posts.length) { history.textContent = 'Your draft history will appear here.'; return; } message.posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-empty'; row.textContent = post.title; history.appendChild(row); }); return; }
 		if (message.type !== 'linkedinStatus') return;
 
 		if (!message.connected) {
@@ -316,7 +389,7 @@ class CodeLoreWorkspacePanel {
 					return;
 				}
 
-				await this.context.workspaceState.update('codelore.latestReflection', reflection);
+				await updateActivePost(this.context, {insight: reflection});
 				await this.refresh('Reflection saved.');
 				return;
 			}
@@ -328,7 +401,7 @@ class CodeLoreWorkspacePanel {
 					await this.postStatus('Add a reflection first.');
 					return;
 				}
-				await this.context.workspaceState.update('codelore.latestReflection', reflection);
+				await updateActivePost(this.context, {insight: reflection});
 
 				await this.postStatus('Writing your LinkedIn draft...');
 				const latestCommitMessage = await getLatestCommitMessage();
@@ -344,24 +417,24 @@ class CodeLoreWorkspacePanel {
 
 				try {
 					const draft = await generateAiPostDraft(reflection, 'linkedin', latestCommitMessage) ?? fallbackDraft;
-					await this.context.workspaceState.update('codelore.latestDraft', draft);
+					await updateActivePost(this.context, {draft});
 					await this.refresh('Draft ready for your review.');
 				} catch (error) {
 					console.error('Error generating CodeLore draft:', error);
-					await this.context.workspaceState.update('codelore.latestDraft', fallbackDraft);
+					await updateActivePost(this.context, {draft: fallbackDraft});
 					await this.refresh('Copilot was unavailable, so CodeLore made a simple draft.');
 				}
 				return;
 			}
 
 			if (message.command === 'saveDraft') {
-				await this.context.workspaceState.update('codelore.latestDraft', message.value?.trim() ?? '');
+				await updateActivePost(this.context, {draft: message.value?.trim() ?? ''});
 				await this.refresh('Draft saved.');
 				return;
 			}
 
 			if (message.command === 'copyDraft') {
-				const draft = this.context.workspaceState.get<string>('codelore.latestDraft');
+				const draft = (await getActivePost(this.context)).draft;
 				if (!draft) {
 					await this.postStatus('Create a draft before copying it.');
 					return;
@@ -379,10 +452,11 @@ class CodeLoreWorkspacePanel {
 			return;
 		}
 
+		const post = await getActivePost(this.context);
 		await this.panel.webview.postMessage({
 			type: 'state',
-			reflection: this.context.workspaceState.get<string>('codelore.latestReflection') ?? '',
-			draft: this.context.workspaceState.get<string>('codelore.latestDraft') ?? '',
+			reflection: post.insight,
+			draft: post.draft,
 			status,
 		});
 	}
