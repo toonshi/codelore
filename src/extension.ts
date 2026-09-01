@@ -19,6 +19,7 @@ type CodeLorePost = {
 	draft: string;
 	createdAt: number;
 	updatedAt: number;
+	publishedAt?: number;
 };
 
 const postsKey = 'codelore.posts';
@@ -42,6 +43,10 @@ async function getPosts(context: vscode.ExtensionContext): Promise<CodeLorePost[
 function postTitle(post: CodeLorePost): string {
 	const text = (post.draft || post.insight).replaceAll(/\s+/g, ' ').trim();
 	return text.length > 44 ? `${text.slice(0, 44)}…` : text || 'Untitled post';
+}
+
+function postState(post: CodeLorePost): 'published' | 'draft' {
+	return post.publishedAt ? 'published' : 'draft';
 }
 
 async function createPost(context: vscode.ExtensionContext): Promise<CodeLorePost> {
@@ -243,7 +248,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
 		const posts = await getPosts(this.context);
-		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({id: post.id, title: postTitle(post), updatedAt: post.updatedAt}))});
+		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({id: post.id, title: postTitle(post), updatedAt: post.updatedAt, state: postState(post)}))});
 
 		try {
 			const status = connectionId
@@ -285,6 +290,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	.new-post { margin: 18px 0 0; text-align: left; }
 	.history-empty { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; padding: 10px 4px; }
 	.history-row { align-items: center; border-radius: 4px; display: flex; gap: 6px; padding: 7px 4px; } .history-row:hover { background: var(--vscode-list-hoverBackground); } .history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .history-action { background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; margin: 0; padding: 2px; width: auto; }
+	.filters { display: flex; gap: 6px; margin-bottom: 6px; } .filter { background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; margin: 0; padding: 3px 4px; width: auto; } .filter.active { color: var(--vscode-foreground); } .post-state { color: var(--vscode-descriptionForeground); font-size: 11px; }
 	.accounts { margin-top: auto; padding-top: 24px; }
 	.privacy { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; margin-top: 24px; }
 </style>
@@ -295,7 +301,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	<button class="new-post" data-command="newPost">+ New post</button>
 
 	<p class="section">Posts</p>
-	<div class="history-empty" id="history">Your draft history will appear here.</div>
+	<div class="filters"><button class="filter active" data-filter="all">All</button><button class="filter" data-filter="draft">Drafts</button><button class="filter" data-filter="published">Published</button></div><div class="history-empty" id="history">Your draft history will appear here.</div>
 
 	<div class="accounts">
 		<p class="section">Accounts</p>
@@ -331,15 +337,17 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	const copy = document.getElementById('linkedin-copy');
 	const mark = document.getElementById('linkedin-mark');
 	const history = document.getElementById('history');
+	let postFilter = 'all'; let savedPosts = [];
 
 	button.addEventListener('click', () => vscode.postMessage({command: 'connectLinkedIn'}));
 	document.querySelectorAll('[data-command]').forEach((item) => {
 		item.addEventListener('click', () => vscode.postMessage({command: item.dataset.command}));
 	});
+	document.querySelectorAll('[data-filter]').forEach((item) => item.addEventListener('click', () => { postFilter = item.dataset.filter; document.querySelectorAll('[data-filter]').forEach(button => button.classList.toggle('active', button.dataset.filter === postFilter)); window.dispatchEvent(new MessageEvent('message', {data: {type: 'posts', posts: savedPosts}})); }));
 
 	window.addEventListener('message', (event) => {
 		const message = event.data;
-		if (message.type === 'posts') { history.replaceChildren(); if (!message.posts.length) { history.textContent = 'Your draft history will appear here.'; return; } message.posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const edit = document.createElement('button'); edit.className = 'history-action'; edit.textContent = 'Edit'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.textContent = 'Delete'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, edit, remove); history.appendChild(row); }); return; }
+		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published' : 'Draft'; const edit = document.createElement('button'); edit.className = 'history-action'; edit.textContent = 'Edit'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.textContent = 'Delete'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
 		if (message.type !== 'linkedinStatus') return;
 
 		if (!message.connected) {
@@ -481,6 +489,8 @@ class CodeLoreWorkspacePanel {
 					await this.postStatus('Publishing to LinkedIn...');
 					const response = await fetch(`${apiBaseUrl}/linkedin/publish`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({connectionId, text: message.value.trim()})});
 					const result = (await response.json()) as {published?: boolean; error?: string};
+					if (result.published) await updateActivePost(this.context, {publishedAt: Date.now()});
+					if (!result.published && result.error?.includes('expired')) await this.refresh('Your LinkedIn connection expired. Reconnect from the CodeLore sidebar.');
 					await this.panel?.webview.postMessage({type: 'publishResult', published: Boolean(result.published), message: result.error});
 					await this.postStatus(result.published ? 'Published to LinkedIn.' : result.error ?? 'LinkedIn could not publish this post.');
 				} catch (error) {
@@ -542,14 +552,14 @@ class CodeLoreWorkspacePanel {
 	.footer-actions { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 24px; }
 	.footer-actions .primary { margin-top: 0; }
 	.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
-	.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 24px; }
+	.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 24px; white-space: pre-wrap; }
 	@media (max-width: 560px) { main { padding: 28px 20px; } }
 </style></head>
 <body><div class="app"><main>
 	<section class="view active" id="create"><h1 id="create-title">Share what you learned today</h1><p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p><textarea id="editor" placeholder="Today I learned..."></textarea><div id="insight-actions"><button class="primary" id="generate-draft">Generate LinkedIn draft</button><button class="secondary" id="save-reflection">Save insight</button></div><div id="draft-actions" hidden><button class="secondary" id="back-to-insight">Back to insight</button><button class="secondary" id="regenerate-draft">Regenerate</button><button class="secondary" id="save-draft">Save changes</button><button class="secondary" id="copy-draft">Copy draft</button></div></section>
-	<section class="view" id="publish"><h1>Review before you publish</h1><p>This is the exact text CodeLore will send. Nothing posts automatically.</p><div class="empty" id="review-content"></div><p class="footer" id="review-account">Checking LinkedIn connection...</p><button class="secondary" id="back-to-draft">Back to edit</button></section>
+	<section class="view" id="publish"><h1>Preview & publish</h1><p>This is the exact text CodeLore will send. Nothing posts automatically.</p><div class="empty" id="review-content"></div><p class="footer" id="review-account">Checking LinkedIn connection...</p><button class="secondary" id="back-to-draft">Back to edit</button></section>
 	<div class="footer" id="status"></div>
-	<div class="footer-actions" id="footer-actions"><button class="primary" id="review-publish">Review & publish</button><button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button></div>
+	<div class="footer-actions" id="footer-actions"><button class="primary" id="review-publish">Preview & publish</button><button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button></div>
 </main></div>
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
