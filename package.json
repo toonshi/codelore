@@ -36,6 +36,10 @@
       {
         "command": "codelore.checkLinkedInConnection",
         "title": "CodeLore: Check LinkedIn Connection"
+      },
+      {
+        "command": "codelore.openWorkspace",
+        "title": "CodeLore: Open Workspace"
       }
     ],
     "viewsContainers": {
