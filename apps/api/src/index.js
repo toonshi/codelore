@@ -8,6 +8,18 @@ app.get('/health', (c) => {
         status: 'ok',
     });
 });
+app.get('/auth/linkedin/status', async (c) => {
+    const connectionId = c.req.query('connection_id');
+    if (!connectionId || connectionId.length < 16) {
+        return c.json({ connected: false }, 400);
+    }
+    const connection = await c.env.DB.prepare(`SELECT id
+     FROM linkedin_connections
+     WHERE id = ? AND token_expires_at > ?`)
+        .bind(connectionId, Date.now())
+        .first();
+    return c.json({ connected: Boolean(connection) });
+});
 app.get('/auth/linkedin/start', async (c) => {
     const connectionId = c.req.query('connection_id');
     if (!connectionId || connectionId.length < 16) {
@@ -62,6 +74,10 @@ app.get('/auth/linkedin/callback', async (c) => {
         .bind(savedState.connection_id, `urn:li:person:${profile.sub}`, await encrypt(token.access_token, c.env.TOKEN_ENCRYPTION_KEY), now + token.expires_in * 1000, now, now)
         .run();
     return connectionResult(true, 'LinkedIn is connected. You can return to VS Code.');
+});
+app.onError((error, c) => {
+    console.error(error.message);
+    return c.json({ error: 'Something went wrong while connecting LinkedIn.' }, 500);
 });
 async function exchangeCode(env, code) {
     const response = await fetch('https://www.linkedin.com/oauth/v2/accessToken', {
