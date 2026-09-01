@@ -400,7 +400,7 @@ class CodeLoreWorkspacePanel {
 		this.panel.onDidDispose(() => {
 			this.panel = undefined;
 		});
-		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string}) => {
+		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string}) => {
 			if (message.command === 'ready') {
 				await this.refresh();
 				await this.panel?.webview.postMessage({type: 'navigate', view: this.activeView});
@@ -467,6 +467,26 @@ class CodeLoreWorkspacePanel {
 
 				await vscode.env.clipboard.writeText(draft);
 				await this.postStatus('Draft copied to your clipboard.');
+				return;
+			}
+
+			if (message.command === 'publishPost') {
+				const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+				if (!connectionId || !message.value?.trim()) {
+					await this.postStatus('Connect LinkedIn and add text before publishing.');
+					return;
+				}
+				await updateActivePost(this.context, message.source === 'draft' ? {draft: message.value.trim()} : {insight: message.value.trim()});
+				try {
+					await this.postStatus('Publishing to LinkedIn...');
+					const response = await fetch(`${apiBaseUrl}/linkedin/publish`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({connectionId, text: message.value.trim()})});
+					const result = (await response.json()) as {published?: boolean; error?: string};
+					await this.panel?.webview.postMessage({type: 'publishResult', published: Boolean(result.published), message: result.error});
+					await this.postStatus(result.published ? 'Published to LinkedIn.' : result.error ?? 'LinkedIn could not publish this post.');
+				} catch (error) {
+					console.error('Error publishing to LinkedIn:', error);
+					await this.postStatus('CodeLore could not reach LinkedIn. Try again shortly.');
+				}
 			}
 		});
 
@@ -515,7 +535,7 @@ class CodeLoreWorkspacePanel {
 	textarea { background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; box-sizing: border-box; color: var(--vscode-input-foreground); font: 14px/1.55 var(--vscode-font-family); min-height: 220px; padding: 14px; resize: vertical; width: 100%; }
 	textarea:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--vscode-focusBorder); }
 	.primary { align-self: flex-end; background: var(--vscode-button-background); border: 0; border-radius: 5px; color: var(--vscode-button-foreground); cursor: pointer; font: inherit; margin-top: 16px; padding: 9px 14px; }
-	.primary:hover { background: var(--vscode-button-hoverBackground); }
+	.primary:hover { background: var(--vscode-button-hoverBackground); } .published { background: var(--vscode-testing-iconPassed) !important; color: var(--vscode-editor-background) !important; }
 	.secondary { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin: 16px 8px 0 0; padding: 9px 14px; }
 	#draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
 	#draft-actions[hidden] { display: none; }
@@ -545,7 +565,8 @@ class CodeLoreWorkspacePanel {
 	document.getElementById('back-to-insight').addEventListener('click', () => { draft = editor.value; showMode('insight'); });
 	reviewButton.addEventListener('click', () => { if (mode === 'draft') draft = editor.value; else insight = editor.value; reviewText = editor.value; showView('publish'); });
 	document.getElementById('back-to-draft').addEventListener('click', () => { showView('create'); showMode('draft'); });
-	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { insight = message.reflection || ''; draft = message.draft || ''; if (isGenerating && draft) { isGenerating = false; showMode('draft'); } else { showMode(mode); } reviewAccount.textContent = message.linkedIn?.connected ? message.linkedIn.displayName || 'LinkedIn connected' : 'Connect LinkedIn before publishing.'; status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'navigate') showView(message.view); });
+	publishButton.addEventListener('click', () => { if (publishButton.dataset.confirm !== 'true') { publishButton.dataset.confirm = 'true'; publishButton.textContent = 'Confirm publish to LinkedIn'; status.textContent = 'This will publish publicly to LinkedIn.'; return; } publishButton.disabled = true; publishButton.textContent = 'Publishing…'; vscode.postMessage({command: 'publishPost', value: reviewText || draft || insight, source: mode}); });
+	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { insight = message.reflection || ''; draft = message.draft || ''; if (isGenerating && draft) { isGenerating = false; showMode('draft'); } else { showMode(mode); } reviewAccount.textContent = message.linkedIn?.connected ? message.linkedIn.displayName || 'LinkedIn connected' : 'Connect LinkedIn before publishing.'; publishButton.disabled = !message.linkedIn?.connected; status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'publishResult') { publishButton.textContent = message.published ? 'Published ✓' : 'Couldn’t publish'; publishButton.classList.toggle('published', message.published); publishButton.disabled = true; } if (message.type === 'navigate') showView(message.view); });
 	vscode.postMessage({command: 'ready'});
 </script></body></html>`;
 	}

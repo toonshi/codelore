@@ -23,6 +23,11 @@ type LinkedInToken = {
   expires_in: number
 }
 
+type PublishRequest = {
+  connectionId?: string
+  text?: string
+}
+
 const LINKEDIN_REDIRECT_URI =
   'https://codelore-api.codelore.workers.dev/auth/linkedin/callback'
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
@@ -89,6 +94,61 @@ app.get('/auth/linkedin/status', async (c) => {
     console.error('LinkedIn profile refresh failed:', error)
     return c.json({ connected: true, displayName: null, pictureUrl: null })
   }
+})
+
+app.post('/linkedin/publish', async (c) => {
+  const body = await c.req.json<PublishRequest>()
+  const connectionId = body.connectionId?.trim()
+  const text = body.text?.trim()
+
+  if (!connectionId || !text) {
+    return c.json({ error: 'A connection and post text are required.' }, 400)
+  }
+
+  if (text.length > 3_000) {
+    return c.json({ error: 'LinkedIn posts must be 3,000 characters or fewer.' }, 400)
+  }
+
+  const connection = await c.env.DB.prepare(
+    `SELECT member_urn, encrypted_access_token
+     FROM linkedin_connections
+     WHERE id = ? AND token_expires_at > ?`,
+  )
+    .bind(connectionId, Date.now())
+    .first<{member_urn: string; encrypted_access_token: string}>()
+
+  if (!connection) {
+    return c.json({ error: 'Your LinkedIn connection expired. Reconnect to continue.' }, 401)
+  }
+
+  const response = await fetch('https://api.linkedin.com/rest/posts', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${await decrypt(connection.encrypted_access_token, c.env.TOKEN_ENCRYPTION_KEY)}`,
+      'Content-Type': 'application/json',
+      'Linkedin-Version': '202601',
+      'X-Restli-Protocol-Version': '2.0.0',
+    },
+    body: JSON.stringify({
+      author: connection.member_urn,
+      commentary: text,
+      visibility: 'PUBLIC',
+      distribution: {
+        feedDistribution: 'MAIN_FEED',
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    }),
+  })
+
+  if (!response.ok) {
+    console.error(`LinkedIn publish failed with status ${response.status}.`)
+    return c.json({ error: 'LinkedIn could not publish this post. Try again shortly.' }, 502)
+  }
+
+  return c.json({ published: true, postId: response.headers.get('x-restli-id') })
 })
 
 app.get('/auth/linkedin/start', async (c) => {
