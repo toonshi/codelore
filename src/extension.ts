@@ -478,10 +478,18 @@ class CodeLoreWorkspacePanel {
 		}
 
 		const post = await getActivePost(this.context);
+		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+		let linkedIn: LinkedInStatus = {connected: false};
+		try {
+			linkedIn = connectionId ? await getLinkedInStatus(connectionId) : linkedIn;
+		} catch (error) {
+			console.error('Error loading LinkedIn review status:', error);
+		}
 		await this.panel.webview.postMessage({
 			type: 'state',
 			reflection: post.insight,
 			draft: post.draft,
+			linkedIn,
 			status,
 		});
 	}
@@ -519,15 +527,15 @@ class CodeLoreWorkspacePanel {
 </style></head>
 <body><div class="app"><main>
 	<section class="view active" id="create"><h1 id="create-title">Share what you learned today</h1><p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p><textarea id="editor" placeholder="Today I learned..."></textarea><div id="insight-actions"><button class="primary" id="generate-draft">Generate LinkedIn draft</button><button class="secondary" id="save-reflection">Save insight</button></div><div id="draft-actions" hidden><button class="secondary" id="back-to-insight">Back to insight</button><button class="secondary" id="regenerate-draft">Regenerate</button><button class="secondary" id="save-draft">Save changes</button><button class="secondary" id="copy-draft">Copy draft</button></div></section>
-	<section class="view" id="publish"><h1>Review before you publish</h1><p>Publishing will always show your exact final draft and require one clear confirmation. Nothing posts automatically.</p><div class="empty">Your LinkedIn publishing step is next.</div><button class="secondary" id="back-to-draft">Back to draft</button></section>
+	<section class="view" id="publish"><h1>Review before you publish</h1><p>This is the exact text CodeLore will send. Nothing posts automatically.</p><div class="empty" id="review-content"></div><p class="footer" id="review-account">Checking LinkedIn connection...</p><button class="secondary" id="back-to-draft">Back to edit</button></section>
 	<div class="footer" id="status"></div>
-	<div class="footer-actions" id="footer-actions"><button class="primary" id="review-publish">Review & publish</button></div>
+	<div class="footer-actions" id="footer-actions"><button class="primary" id="review-publish">Review & publish</button><button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button></div>
 </main></div>
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
-	const editor = document.getElementById('editor'); const status = document.getElementById('status'); const createTitle = document.getElementById('create-title'); const createCopy = document.getElementById('create-copy'); const insightActions = document.getElementById('insight-actions'); const draftActions = document.getElementById('draft-actions'); const footerActions = document.getElementById('footer-actions');
-	let insight = ''; let draft = ''; let mode = 'insight'; let isGenerating = false;
-	function showView(view) { document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view)); footerActions.hidden = view === 'publish'; }
+	const editor = document.getElementById('editor'); const status = document.getElementById('status'); const createTitle = document.getElementById('create-title'); const createCopy = document.getElementById('create-copy'); const insightActions = document.getElementById('insight-actions'); const draftActions = document.getElementById('draft-actions'); const footerActions = document.getElementById('footer-actions'); const reviewContent = document.getElementById('review-content'); const reviewAccount = document.getElementById('review-account'); const reviewButton = document.getElementById('review-publish'); const publishButton = document.getElementById('publish-linkedin');
+	let insight = ''; let draft = ''; let reviewText = ''; let mode = 'insight'; let isGenerating = false;
+	function showView(view) { document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view)); reviewButton.hidden = view === 'publish'; publishButton.hidden = view !== 'publish'; if (view === 'publish') reviewContent.textContent = reviewText || draft || insight || 'Write something before you publish.'; }
 	function showMode(nextMode) { mode = nextMode; const isDraft = mode === 'draft'; createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'Share what you learned today'; createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.'; editor.value = isDraft ? draft : insight; editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'Today I learned...'; insightActions.hidden = isDraft; draftActions.hidden = !isDraft; }
 	document.getElementById('save-reflection').addEventListener('click', () => vscode.postMessage({command: 'saveReflection', value: editor.value}));
 	document.getElementById('generate-draft').addEventListener('click', () => { insight = editor.value; isGenerating = true; vscode.postMessage({command: 'generateDraft', value: insight}); });
@@ -535,9 +543,9 @@ class CodeLoreWorkspacePanel {
 	document.getElementById('save-draft').addEventListener('click', () => vscode.postMessage({command: 'saveDraft', value: editor.value}));
 	document.getElementById('copy-draft').addEventListener('click', () => vscode.postMessage({command: 'copyDraft'}));
 	document.getElementById('back-to-insight').addEventListener('click', () => { draft = editor.value; showMode('insight'); });
-	document.getElementById('review-publish').addEventListener('click', () => { if (mode === 'draft') draft = editor.value; else insight = editor.value; showView('publish'); });
+	reviewButton.addEventListener('click', () => { if (mode === 'draft') draft = editor.value; else insight = editor.value; reviewText = editor.value; showView('publish'); });
 	document.getElementById('back-to-draft').addEventListener('click', () => { showView('create'); showMode('draft'); });
-	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { insight = message.reflection || ''; draft = message.draft || ''; if (isGenerating && draft) { isGenerating = false; showMode('draft'); } else { showMode(mode); } status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'navigate') showView(message.view); });
+	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { insight = message.reflection || ''; draft = message.draft || ''; if (isGenerating && draft) { isGenerating = false; showMode('draft'); } else { showMode(mode); } reviewAccount.textContent = message.linkedIn?.connected ? message.linkedIn.displayName || 'LinkedIn connected' : 'Connect LinkedIn before publishing.'; status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'navigate') showView(message.view); });
 	vscode.postMessage({command: 'ready'});
 </script></body></html>`;
 	}
