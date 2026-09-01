@@ -28,6 +28,14 @@
       {
         "command": "codelore.copyLatestDraft",
         "title": "CodeLore: Copy Latest Draft"
+      },
+      {
+        "command": "codelore.connectLinkedIn",
+        "title": "CodeLore: Connect LinkedIn"
+      },
+      {
+        "command": "codelore.checkLinkedInConnection",
+        "title": "CodeLore: Check LinkedIn Connection"
       }
     ],
     "viewsContainers": {

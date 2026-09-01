@@ -1,9 +1,24 @@
 
 import * as vscode from 'vscode';
 import {execFile} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
 import {promisify} from 'node:util';
 
 const execFileAsync = promisify(execFile);
+const apiBaseUrl = 'https://codelore-api.codelore.workers.dev';
+
+async function isLinkedInConnected(connectionId: string): Promise<boolean> {
+	const response = await fetch(
+		`${apiBaseUrl}/auth/linkedin/status?connection_id=${encodeURIComponent(connectionId)}`,
+	);
+	const result = (await response.json()) as {connected: boolean};
+
+	return response.ok && result.connected;
+}
+
+function delay(milliseconds: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 
 async function getLatestCommitMessage(): Promise<string | undefined> {
@@ -96,6 +111,11 @@ class CodeLoreViewProvider
 
 	getChildren(): vscode.TreeItem[] {
 		return [
+			this.createAction(
+				'Connect LinkedIn',
+				'codelore.connectLinkedIn',
+				'link-external',
+			),
 			this.createAction(
 				'Reflect on Today',
 				'codelore.reflectOnToday',
@@ -207,6 +227,85 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showInformationMessage(
 				'Latest draft copied to clipboard.',
 			);
+		},
+	);
+
+	const connectLinkedIn = vscode.commands.registerCommand(
+		'codelore.connectLinkedIn',
+		async () => {
+			let connectionId = await context.secrets.get('codelore.linkedinConnectionId');
+
+			if (!connectionId) {
+				connectionId = randomUUID();
+				await context.secrets.store('codelore.linkedinConnectionId', connectionId);
+			}
+
+			const connectUrl = vscode.Uri.parse(
+				`${apiBaseUrl}/auth/linkedin/start?connection_id=${encodeURIComponent(connectionId)}`,
+			);
+			await vscode.env.openExternal(connectUrl);
+
+			const connected = await vscode.window.withProgress(
+				{
+					location: vscode.ProgressLocation.Notification,
+					title: 'Waiting for LinkedIn approval...',
+					cancellable: true,
+				},
+				async (_progress, token) => {
+					const deadline = Date.now() + 10 * 60 * 1000;
+
+					while (!token.isCancellationRequested && Date.now() < deadline) {
+						try {
+							if (await isLinkedInConnected(connectionId)) {
+								return true;
+							}
+						} catch (error) {
+							console.error('Error waiting for LinkedIn connection:', error);
+						}
+
+						await delay(2_000);
+					}
+
+					return false;
+				},
+			);
+
+			if (connected) {
+				vscode.window.showInformationMessage('LinkedIn is connected to CodeLore.');
+				return;
+			}
+
+			vscode.window.showInformationMessage(
+				'LinkedIn is still waiting for approval. You can try connecting again whenever you are ready.',
+			);
+		},
+	);
+
+	const checkLinkedInConnection = vscode.commands.registerCommand(
+		'codelore.checkLinkedInConnection',
+		async () => {
+			const connectionId = await context.secrets.get('codelore.linkedinConnectionId');
+
+			if (!connectionId) {
+				vscode.window.showInformationMessage(
+					'LinkedIn is not connected yet. Start with CodeLore: Connect LinkedIn.',
+				);
+				return;
+			}
+
+			try {
+				if (await isLinkedInConnected(connectionId)) {
+					vscode.window.showInformationMessage('LinkedIn is connected to CodeLore.');
+					return;
+				}
+
+				vscode.window.showInformationMessage(
+					'LinkedIn is not connected yet. Run CodeLore: Connect LinkedIn to try again.',
+				);
+			} catch (error) {
+				console.error('Error checking LinkedIn connection:', error);
+				vscode.window.showErrorMessage('CodeLore could not check LinkedIn right now.');
+			}
 		},
 	);
 
@@ -331,7 +430,9 @@ export function activate(context: vscode.ExtensionContext) {
 		disposable,
 		viewLatestReflection,
 		draftPostFromLatestReflection,
-		copyLatestDraft
+		copyLatestDraft,
+		connectLinkedIn,
+		checkLinkedInConnection,
 	);
 }
 
