@@ -135,14 +135,8 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 				return;
 			}
 
-			if (message.command === 'reflect' || message.command === 'draft' || message.command === 'copy') {
-				const commands: Record<string, string> = {
-					reflect: 'codelore.openWorkspace',
-					draft: 'codelore.openWorkspace',
-					copy: 'codelore.copyLatestDraft',
-				};
-				const view = message.command === 'reflect' ? 'today' : 'drafts';
-				await vscode.commands.executeCommand(commands[message.command], view);
+			if (message.command === 'openWorkspace') {
+				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
 			}
 		});
 
@@ -222,11 +216,9 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 		<button disabled>Coming soon</button>
 	</div>
 
-	<p class="section">Today</p>
+	<p class="section">Create</p>
 	<div class="actions">
-		<button data-command="reflect">Reflect on today</button>
-		<button data-command="draft">Draft a post</button>
-		<button data-command="copy">Copy latest draft</button>
+		<button data-command="openWorkspace">Open CodeLore</button>
 	</div>
 
 	<p class="privacy">Your work stays local until you choose to publish.</p>
@@ -282,11 +274,11 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 class CodeLoreWorkspacePanel {
 	private panel: vscode.WebviewPanel | undefined;
-	private activeView: 'today' | 'drafts' | 'publish' = 'today';
+	private activeView: 'create' | 'publish' = 'create';
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	open(view: 'today' | 'drafts' | 'publish' = 'today'): void {
+	open(view: 'create' | 'publish' = 'create'): void {
 		this.activeView = view;
 		if (this.panel) {
 			this.panel.reveal(vscode.ViewColumn.Active);
@@ -325,11 +317,13 @@ class CodeLoreWorkspacePanel {
 			}
 
 			if (message.command === 'generateDraft') {
-				const reflection = this.context.workspaceState.get<string>('codelore.latestReflection');
+				const reflection = message.value?.trim()
+					?? this.context.workspaceState.get<string>('codelore.latestReflection');
 				if (!reflection) {
 					await this.postStatus('Add a reflection first.');
 					return;
 				}
+				await this.context.workspaceState.update('codelore.latestReflection', reflection);
 
 				await this.postStatus('Writing your LinkedIn draft...');
 				const latestCommitMessage = await getLatestCommitMessage();
@@ -401,12 +395,8 @@ class CodeLoreWorkspacePanel {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 <style>
 	body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); margin: 0; }
-	.app { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 100vh; }
-	.sidebar { background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-panel-border); box-sizing: border-box; padding: 22px 12px; }
-	.brand { font-size: 15px; font-weight: 600; margin: 0 0 20px 8px; }
-	.nav { background: transparent; border: 0; color: var(--vscode-sideBar-foreground); cursor: pointer; font: inherit; padding: 9px 10px; text-align: left; width: 100%; }
-	.nav.active, .nav:hover { background: var(--vscode-list-hoverBackground); border-radius: 4px; }
-	main { box-sizing: border-box; display: flex; flex-direction: column; max-width: 860px; min-height: 100vh; padding: 48px; }
+	.app { min-height: 100vh; }
+	main { box-sizing: border-box; display: flex; flex-direction: column; margin: 0 auto; max-width: 860px; min-height: 100vh; padding: 48px; width: 100%; }
 	.view { display: none; flex: 1; } .view.active { display: block; }
 	h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
 	p { color: var(--vscode-descriptionForeground); line-height: 1.55; margin: 0 0 22px; }
@@ -415,27 +405,35 @@ class CodeLoreWorkspacePanel {
 	.primary { align-self: flex-end; background: var(--vscode-button-background); border: 0; border-radius: 5px; color: var(--vscode-button-foreground); cursor: pointer; font: inherit; margin-top: 16px; padding: 9px 14px; }
 	.primary:hover { background: var(--vscode-button-hoverBackground); }
 	.secondary { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin: 16px 8px 0 0; padding: 9px 14px; }
+	#draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
+	#draft-actions[hidden] { display: none; }
+	.footer-actions { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 24px; }
+	.footer-actions .primary { margin-top: 0; }
 	.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
 	.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 24px; }
-	@media (max-width: 560px) { .app { grid-template-columns: 1fr; } .sidebar { border-bottom: 1px solid var(--vscode-panel-border); border-right: 0; display: flex; gap: 6px; padding: 10px; } .brand { display: none; } .nav { width: auto; } main { padding: 28px 20px; } }
+	@media (max-width: 560px) { main { padding: 28px 20px; } }
 </style></head>
-<body><div class="app"><aside class="sidebar"><div class="brand">CodeLore</div><button class="nav active" data-view="today">Today</button><button class="nav" data-view="drafts">Drafts</button><button class="nav" data-view="publish">Publish</button></aside>
-<main>
-	<section class="view active" id="today"><h1>Reflect on today</h1><p>Capture what you built, learned, or got unstuck on. It stays local until you decide to share it.</p><textarea id="reflection" placeholder="Today I learned..."></textarea><button class="primary" id="save-reflection">Save reflection</button></section>
-	<section class="view" id="drafts"><h1>Draft your LinkedIn post</h1><p>CodeLore uses your reflection and latest commit message to make a thoughtful first draft.</p><textarea id="draft" placeholder="Your draft will appear here."></textarea><button class="primary" id="generate-draft">Generate draft</button><button class="secondary" id="save-draft">Save changes</button><button class="secondary" id="copy-draft">Copy draft</button></section>
-	<section class="view" id="publish"><h1>Review before you publish</h1><p>Publishing will always show your exact final draft and require one clear confirmation. Nothing posts automatically.</p><div class="empty">Your LinkedIn publishing step is next.</div></section>
+<body><div class="app"><main>
+	<section class="view active" id="create"><h1 id="create-title">Share what you learned today</h1><p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p><textarea id="editor" placeholder="Today I learned..."></textarea><div id="insight-actions"><button class="primary" id="generate-draft">Generate LinkedIn draft</button><button class="secondary" id="save-reflection">Save insight</button></div><div id="draft-actions" hidden><button class="secondary" id="back-to-insight">Back to insight</button><button class="secondary" id="regenerate-draft">Regenerate</button><button class="secondary" id="save-draft">Save changes</button><button class="secondary" id="copy-draft">Copy draft</button></div></section>
+	<section class="view" id="publish"><h1>Review before you publish</h1><p>Publishing will always show your exact final draft and require one clear confirmation. Nothing posts automatically.</p><div class="empty">Your LinkedIn publishing step is next.</div><button class="secondary" id="back-to-draft">Back to draft</button></section>
 	<div class="footer" id="status"></div>
+	<div class="footer-actions" id="footer-actions"><button class="primary" id="review-publish">Review & publish</button></div>
 </main></div>
 <script nonce="${nonce}">
 	const vscode = acquireVsCodeApi();
-	const reflection = document.getElementById('reflection'); const draft = document.getElementById('draft'); const status = document.getElementById('status');
-	function showView(view) { document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view)); document.querySelectorAll('.nav').forEach(item => item.classList.toggle('active', item.dataset.view === view)); }
-	document.querySelectorAll('.nav').forEach(item => item.addEventListener('click', () => showView(item.dataset.view)));
-	document.getElementById('save-reflection').addEventListener('click', () => vscode.postMessage({command: 'saveReflection', value: reflection.value}));
-	document.getElementById('generate-draft').addEventListener('click', () => vscode.postMessage({command: 'generateDraft'}));
-	document.getElementById('save-draft').addEventListener('click', () => vscode.postMessage({command: 'saveDraft', value: draft.value}));
+	const editor = document.getElementById('editor'); const status = document.getElementById('status'); const createTitle = document.getElementById('create-title'); const createCopy = document.getElementById('create-copy'); const insightActions = document.getElementById('insight-actions'); const draftActions = document.getElementById('draft-actions'); const footerActions = document.getElementById('footer-actions');
+	let insight = ''; let draft = ''; let mode = 'insight'; let isGenerating = false;
+	function showView(view) { document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view)); footerActions.hidden = view === 'publish'; }
+	function showMode(nextMode) { mode = nextMode; const isDraft = mode === 'draft'; createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'Share what you learned today'; createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.'; editor.value = isDraft ? draft : insight; editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'Today I learned...'; insightActions.hidden = isDraft; draftActions.hidden = !isDraft; }
+	document.getElementById('save-reflection').addEventListener('click', () => vscode.postMessage({command: 'saveReflection', value: editor.value}));
+	document.getElementById('generate-draft').addEventListener('click', () => { insight = editor.value; isGenerating = true; vscode.postMessage({command: 'generateDraft', value: insight}); });
+	document.getElementById('regenerate-draft').addEventListener('click', () => { isGenerating = true; vscode.postMessage({command: 'generateDraft', value: insight}); });
+	document.getElementById('save-draft').addEventListener('click', () => vscode.postMessage({command: 'saveDraft', value: editor.value}));
 	document.getElementById('copy-draft').addEventListener('click', () => vscode.postMessage({command: 'copyDraft'}));
-	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { reflection.value = message.reflection || ''; draft.value = message.draft || ''; status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'navigate') showView(message.view); });
+	document.getElementById('back-to-insight').addEventListener('click', () => { draft = editor.value; showMode('insight'); });
+	document.getElementById('review-publish').addEventListener('click', () => { if (mode === 'draft') draft = editor.value; else insight = editor.value; showView('publish'); });
+	document.getElementById('back-to-draft').addEventListener('click', () => { showView('create'); showMode('draft'); });
+	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { insight = message.reflection || ''; draft = message.draft || ''; if (isGenerating && draft) { isGenerating = false; showMode('draft'); } else { showMode(mode); } status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'navigate') showView(message.view); });
 	vscode.postMessage({command: 'ready'});
 </script></body></html>`;
 	}
@@ -458,7 +456,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	const openWorkspace = vscode.commands.registerCommand(
 		'codelore.openWorkspace',
-		(view?: 'today' | 'drafts' | 'publish') => {
+		(view?: 'create' | 'publish') => {
 			codeloreWorkspacePanel.open(view);
 		},
 	);
