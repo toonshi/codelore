@@ -248,7 +248,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
 		const posts = await getPosts(this.context);
-		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({id: post.id, title: postTitle(post), updatedAt: post.updatedAt, state: postState(post)}))});
+		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({id: post.id, title: postTitle(post), updatedAt: post.updatedAt, publishedAt: post.publishedAt, state: postState(post)}))});
 
 		try {
 			const status = connectionId
@@ -347,7 +347,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 	window.addEventListener('message', (event) => {
 		const message = event.data;
-		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published' : 'Draft'; const edit = document.createElement('button'); edit.className = 'history-action'; edit.textContent = 'Edit'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.textContent = 'Delete'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
+		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } const ago = time => { const minutes = Math.max(1, Math.floor((Date.now() - time) / 60000)); return minutes < 60 ? minutes + 'm ago' : minutes < 1440 ? Math.floor(minutes / 60) + 'h ago' : Math.floor(minutes / 1440) + 'd ago'; }; posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published ' + ago(post.publishedAt) : 'Draft ' + ago(post.updatedAt); const edit = document.createElement('button'); edit.className = 'history-action'; edit.ariaLabel = 'Edit post'; edit.textContent = '✎'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.ariaLabel = 'Delete post'; remove.textContent = '⌫'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
 		if (message.type !== 'linkedinStatus') return;
 
 		if (!message.connected) {
