@@ -7,13 +7,23 @@ import {promisify} from 'node:util';
 const execFileAsync = promisify(execFile);
 const apiBaseUrl = 'https://codelore-api.codelore.workers.dev';
 
-async function isLinkedInConnected(connectionId: string): Promise<boolean> {
+type LinkedInStatus = {
+	connected: boolean;
+	displayName?: string | null;
+	pictureUrl?: string | null;
+};
+
+async function getLinkedInStatus(connectionId: string): Promise<LinkedInStatus> {
 	const response = await fetch(
 		`${apiBaseUrl}/auth/linkedin/status?connection_id=${encodeURIComponent(connectionId)}`,
 	);
-	const result = (await response.json()) as {connected: boolean};
+	const result = (await response.json()) as LinkedInStatus;
 
-	return response.ok && result.connected;
+	return response.ok ? result : {connected: false};
+}
+
+async function isLinkedInConnected(connectionId: string): Promise<boolean> {
+	return (await getLinkedInStatus(connectionId)).connected;
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -102,58 +112,170 @@ async function generateAiPostDraft(
 }
 
 
-class CodeLoreViewProvider
-	implements vscode.TreeDataProvider<vscode.TreeItem>
-{
-	getTreeItem(element: vscode.TreeItem): vscode.TreeItem {
-		return element;
-	}
+class CodeLoreViewProvider implements vscode.WebviewViewProvider {
+	private view: vscode.WebviewView | undefined;
 
-	getChildren(): vscode.TreeItem[] {
-		return [
-			this.createAction(
-				'Connect LinkedIn',
-				'codelore.connectLinkedIn',
-				'link-external',
-			),
-			this.createAction(
-				'Reflect on Today',
-				'codelore.reflectOnToday',
-				'comment',
-			),
-			this.createAction(
-				'Draft Post',
-				'codelore.draftPostFromLatestReflection',
-				'megaphone',
-			),
-			this.createAction(
-				'View Latest Reflection',
-				'codelore.viewLatestReflection',
-				'note',
-			),
-			this.createAction(
-				'Copy Latest Draft',
-				'codelore.copyLatestDraft',
-				'copy',
-			),
-		];
-	}
+	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	private createAction(
-		label: string,
-		command: string,
-		icon: string,
-	): vscode.TreeItem {
-		const item = new vscode.TreeItem(label);
-
-		item.command = {
-			command,
-			title: label,
+	resolveWebviewView(webviewView: vscode.WebviewView): void {
+		this.view = webviewView;
+		webviewView.webview.options = {
+			enableScripts: true,
 		};
+		webviewView.webview.html = this.getHtml(webviewView.webview);
+		webviewView.webview.onDidReceiveMessage(async (message: {command: string}) => {
+			if (message.command === 'connectLinkedIn') {
+				await vscode.commands.executeCommand('codelore.connectLinkedIn');
+				await this.refresh();
+				return;
+			}
 
-		item.iconPath = new vscode.ThemeIcon(icon);
+			if (message.command === 'refresh') {
+				await this.refresh();
+				return;
+			}
 
-		return item;
+			if (message.command === 'reflect' || message.command === 'draft' || message.command === 'copy') {
+				const commands: Record<string, string> = {
+					reflect: 'codelore.reflectOnToday',
+					draft: 'codelore.draftPostFromLatestReflection',
+					copy: 'codelore.copyLatestDraft',
+				};
+				await vscode.commands.executeCommand(commands[message.command]);
+			}
+		});
+
+		void this.refresh();
+	}
+
+	async refresh(): Promise<void> {
+		if (!this.view) {
+			return;
+		}
+
+		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+
+		try {
+			const status = connectionId
+				? await getLinkedInStatus(connectionId)
+				: {connected: false};
+			this.view.webview.postMessage({type: 'linkedinStatus', ...status});
+		} catch (error) {
+			console.error('Error refreshing CodeLore profile:', error);
+			this.view.webview.postMessage({type: 'linkedinStatus', connected: false});
+		}
+	}
+
+	private getHtml(webview: vscode.Webview): string {
+		const nonce = randomUUID();
+
+		return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src ${webview.cspSource} https: data:; script-src 'nonce-${nonce}';">
+<style>
+	body { color: var(--vscode-foreground); font-family: var(--vscode-font-family); font-size: 13px; margin: 0; padding: 16px; }
+	h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+	.subtitle, .muted { color: var(--vscode-descriptionForeground); line-height: 1.45; margin: 0; }
+	.section { font-size: 11px; font-weight: 600; letter-spacing: .04em; margin: 24px 0 8px; text-transform: uppercase; }
+	.card { border: 1px solid var(--vscode-widget-border, var(--vscode-editorWidget-border)); border-radius: 8px; margin-bottom: 10px; padding: 14px; }
+	.card-top { align-items: center; display: flex; gap: 10px; }
+	.mark, .avatar { align-items: center; background: var(--vscode-badge-background); border-radius: 50%; color: var(--vscode-badge-foreground); display: flex; flex: 0 0 auto; font-size: 12px; font-weight: 600; height: 32px; justify-content: center; overflow: hidden; width: 32px; }
+	.avatar img { height: 100%; object-fit: cover; width: 100%; }
+	.card-title { font-weight: 600; }
+	.card-copy { color: var(--vscode-descriptionForeground); margin-top: 2px; }
+	button { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 4px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin-top: 14px; padding: 7px 10px; width: 100%; }
+	button:hover { background: var(--vscode-button-secondaryHoverBackground); }
+	button:disabled { cursor: default; opacity: .55; }
+	.actions { display: grid; gap: 6px; }
+	.actions button { margin: 0; text-align: left; }
+	.privacy { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; margin-top: 24px; }
+</style>
+</head>
+<body>
+	<h1>CodeLore</h1>
+	<p class="subtitle">Turn today’s work into a story worth sharing.</p>
+
+	<p class="section">Publishing</p>
+	<div class="card">
+		<div class="card-top">
+			<div class="mark" id="linkedin-mark">in</div>
+			<div>
+				<div class="card-title" id="linkedin-title">LinkedIn</div>
+				<div class="card-copy" id="linkedin-copy">Share your work with your network.</div>
+			</div>
+		</div>
+		<button id="linkedin-button">Connect LinkedIn</button>
+	</div>
+
+	<div class="card">
+		<div class="card-top">
+			<div class="mark">X</div>
+			<div>
+				<div class="card-title">X</div>
+				<div class="card-copy">Short updates are coming soon.</div>
+			</div>
+		</div>
+		<button disabled>Coming soon</button>
+	</div>
+
+	<p class="section">Today</p>
+	<div class="actions">
+		<button data-command="reflect">Reflect on today</button>
+		<button data-command="draft">Draft a post</button>
+		<button data-command="copy">Copy latest draft</button>
+	</div>
+
+	<p class="privacy">Your work stays local until you choose to publish.</p>
+
+<script nonce="${nonce}">
+	const vscode = acquireVsCodeApi();
+	const button = document.getElementById('linkedin-button');
+	const title = document.getElementById('linkedin-title');
+	const copy = document.getElementById('linkedin-copy');
+	const mark = document.getElementById('linkedin-mark');
+
+	button.addEventListener('click', () => vscode.postMessage({command: 'connectLinkedIn'}));
+	document.querySelectorAll('[data-command]').forEach((item) => {
+		item.addEventListener('click', () => vscode.postMessage({command: item.dataset.command}));
+	});
+
+	window.addEventListener('message', (event) => {
+		const message = event.data;
+		if (message.type !== 'linkedinStatus') return;
+
+		if (!message.connected) {
+			title.textContent = 'LinkedIn';
+			copy.textContent = 'Share your work with your network.';
+			mark.textContent = 'in';
+			button.textContent = 'Connect LinkedIn';
+			button.disabled = false;
+			return;
+		}
+
+		const name = message.displayName || 'LinkedIn connected';
+		title.textContent = name;
+		copy.textContent = 'LinkedIn connected';
+		button.textContent = 'Connected';
+		button.disabled = true;
+		mark.className = 'avatar';
+		mark.textContent = name.charAt(0).toUpperCase();
+
+		if (message.pictureUrl) {
+			const image = document.createElement('img');
+			image.src = message.pictureUrl;
+			image.alt = '';
+			image.addEventListener('error', () => image.remove());
+			mark.replaceChildren(image);
+		}
+	});
+
+	vscode.postMessage({command: 'refresh'});
+</script>
+</body>
+</html>`;
 	}
 }
 
@@ -162,10 +284,10 @@ class CodeLoreViewProvider
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	const codeloreViewProvider = new CodeLoreViewProvider();
+	const codeloreViewProvider = new CodeLoreViewProvider(context);
 
 	context.subscriptions.push(
-	vscode.window.registerTreeDataProvider(
+	vscode.window.registerWebviewViewProvider(
 		'codelore.today',
 		codeloreViewProvider,
 	),

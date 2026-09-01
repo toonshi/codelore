@@ -51,7 +51,8 @@
   "codelore": [
     {
       "id": "codelore.today",
-      "name": "Today"
+      "name": "Today",
+      "type": "webview"
     }
   ]
 }

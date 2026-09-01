@@ -14,6 +14,8 @@ type OAuthState = {
 
 type LinkedInProfile = {
   sub: string
+  name?: string
+  picture?: string
 }
 
 type LinkedInToken = {
@@ -42,14 +44,51 @@ app.get('/auth/linkedin/status', async (c) => {
   }
 
   const connection = await c.env.DB.prepare(
-    `SELECT id
+    `SELECT encrypted_access_token, display_name, profile_picture_url
      FROM linkedin_connections
      WHERE id = ? AND token_expires_at > ?`,
   )
     .bind(connectionId, Date.now())
-    .first()
+    .first<{
+      encrypted_access_token: string
+      display_name: string | null
+      profile_picture_url: string | null
+    }>()
 
-  return c.json({ connected: Boolean(connection) })
+  if (!connection) {
+    return c.json({ connected: false })
+  }
+
+  if (connection.display_name || connection.profile_picture_url) {
+    return c.json({
+      connected: true,
+      displayName: connection.display_name,
+      pictureUrl: connection.profile_picture_url,
+    })
+  }
+
+  try {
+    const profile = await getLinkedInProfile(
+      await decrypt(connection.encrypted_access_token, c.env.TOKEN_ENCRYPTION_KEY),
+    )
+
+    await c.env.DB.prepare(
+      `UPDATE linkedin_connections
+       SET display_name = ?, profile_picture_url = ?, updated_at = ?
+       WHERE id = ?`,
+    )
+      .bind(profile.name ?? null, profile.picture ?? null, Date.now(), connectionId)
+      .run()
+
+    return c.json({
+      connected: true,
+      displayName: profile.name ?? null,
+      pictureUrl: profile.picture ?? null,
+    })
+  } catch (error) {
+    console.error('LinkedIn profile refresh failed:', error)
+    return c.json({ connected: true, displayName: null, pictureUrl: null })
+  }
 })
 
 app.get('/auth/linkedin/start', async (c) => {
@@ -113,12 +152,14 @@ app.get('/auth/linkedin/callback', async (c) => {
 
   await c.env.DB.prepare(
     `INSERT INTO linkedin_connections (
-       id, member_urn, encrypted_access_token, token_expires_at, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?)
+      id, member_urn, encrypted_access_token, token_expires_at, display_name, profile_picture_url, created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(member_urn) DO UPDATE SET
        id = excluded.id,
        encrypted_access_token = excluded.encrypted_access_token,
        token_expires_at = excluded.token_expires_at,
+       display_name = excluded.display_name,
+       profile_picture_url = excluded.profile_picture_url,
        updated_at = excluded.updated_at`,
   )
     .bind(
@@ -126,6 +167,8 @@ app.get('/auth/linkedin/callback', async (c) => {
       `urn:li:person:${profile.sub}`,
       await encrypt(token.access_token, c.env.TOKEN_ENCRYPTION_KEY),
       now + token.expires_in * 1000,
+      profile.name ?? null,
+      profile.picture ?? null,
       now,
       now,
     )
@@ -191,6 +234,24 @@ async function encrypt(value: string, base64Key: string): Promise<string> {
   combined.set(new Uint8Array(encrypted), iv.length)
 
   return bytesToBase64(combined)
+}
+
+async function decrypt(value: string, base64Key: string): Promise<string> {
+  const combined = base64ToBytes(value)
+  const key = await crypto.subtle.importKey(
+    'raw',
+    base64ToBytes(base64Key),
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt'],
+  )
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: combined.slice(0, 12) },
+    key,
+    combined.slice(12),
+  )
+
+  return new TextDecoder().decode(decrypted)
 }
 
 async function sha256(value: string): Promise<string> {
