@@ -185,7 +185,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 			enableScripts: true,
 		};
 		webviewView.webview.html = this.getHtml(webviewView.webview);
-		webviewView.webview.onDidReceiveMessage(async (message: {command: string}) => {
+		webviewView.webview.onDidReceiveMessage(async (message: {command: string; postId?: string}) => {
 			if (message.command === 'connectLinkedIn') {
 				await vscode.commands.executeCommand('codelore.connectLinkedIn');
 				await this.refresh();
@@ -206,6 +206,30 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 			if (message.command === 'openWorkspace') {
 				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
+				return;
+			}
+
+			if (message.command === 'editPost' && message.postId) {
+				await this.context.workspaceState.update(activePostKey, message.postId);
+				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
+				return;
+			}
+
+			if (message.command === 'deletePost' && message.postId) {
+				const choice = await vscode.window.showWarningMessage(
+					'Delete this post? This cannot be undone.',
+					{modal: true},
+					'Delete',
+				);
+				if (choice !== 'Delete') return;
+
+				const posts = await getPosts(this.context);
+				const remainingPosts = posts.filter((post) => post.id !== message.postId);
+				await this.context.workspaceState.update(postsKey, remainingPosts);
+				if (this.context.workspaceState.get<string>(activePostKey) === message.postId) {
+					await this.context.workspaceState.update(activePostKey, remainingPosts[0]?.id);
+				}
+				await this.refresh();
 			}
 		});
 
@@ -219,7 +243,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
 		const posts = await getPosts(this.context);
-		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({title: postTitle(post), updatedAt: post.updatedAt}))});
+		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({id: post.id, title: postTitle(post), updatedAt: post.updatedAt}))});
 
 		try {
 			const status = connectionId
@@ -260,6 +284,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	.actions button { margin: 0; text-align: left; }
 	.new-post { margin: 18px 0 0; text-align: left; }
 	.history-empty { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; padding: 10px 4px; }
+	.history-row { align-items: center; border-radius: 4px; display: flex; gap: 6px; padding: 7px 4px; } .history-row:hover { background: var(--vscode-list-hoverBackground); } .history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .history-action { background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; margin: 0; padding: 2px; width: auto; }
 	.accounts { margin-top: auto; padding-top: 24px; }
 	.privacy { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; margin-top: 24px; }
 </style>
@@ -314,7 +339,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 	window.addEventListener('message', (event) => {
 		const message = event.data;
-		if (message.type === 'posts') { history.replaceChildren(); if (!message.posts.length) { history.textContent = 'Your draft history will appear here.'; return; } message.posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-empty'; row.textContent = post.title; history.appendChild(row); }); return; }
+		if (message.type === 'posts') { history.replaceChildren(); if (!message.posts.length) { history.textContent = 'Your draft history will appear here.'; return; } message.posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const edit = document.createElement('button'); edit.className = 'history-action'; edit.textContent = 'Edit'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.textContent = 'Delete'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, edit, remove); history.appendChild(row); }); return; }
 		if (message.type !== 'linkedinStatus') return;
 
 		if (!message.connected) {
