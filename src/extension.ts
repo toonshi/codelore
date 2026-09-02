@@ -846,6 +846,7 @@ class CodeLoreWorkspacePanel {
 			.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
 			.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 14px; white-space: pre-wrap; }
 			#review-image { border-radius: 6px; display: block; margin-top: 20px; max-height: 500px; max-width: 100%; object-fit: contain; }
+			#review-image[hidden] { display: none; }
 			#alt-text-group { margin-top: 16px; }
 			#alt-text-group[hidden] { display: none; }
 			#alt-text-group label { color: var(--vscode-descriptionForeground); display: block; font-size: 12px; margin-bottom: 6px; }
@@ -1059,8 +1060,13 @@ class CodeLoreWorkspacePanel {
 			function renderImage() {
 				selectImageButton.textContent = imageName ? 'Replace image' : 'Add image';
 				removeImageButton.hidden = !imageName;
-				reviewImage.hidden = !imageUrl;
-				reviewImage.src = imageUrl;
+				const hasImage = Boolean(imageUrl);
+				reviewImage.hidden = !hasImage;
+				if (hasImage) {
+					reviewImage.src = imageUrl;
+				} else {
+					reviewImage.removeAttribute('src');
+				}
 			}
 
 			function renderPreview() {
