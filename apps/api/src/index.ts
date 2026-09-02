@@ -28,9 +28,23 @@ type PublishRequest = {
   text?: string
 }
 
+type LinkedInConnection = {
+  member_urn: string
+  encrypted_access_token: string
+}
+
+type InitializeImageUploadResponse = {
+  value?: {
+    image?: string
+    uploadUrl?: string
+  }
+}
+
 const LINKEDIN_REDIRECT_URI =
   'https://codelore-api.codelore.workers.dev/auth/linkedin/callback'
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000
+const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png'])
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -109,13 +123,7 @@ app.post('/linkedin/publish', async (c) => {
     return c.json({ error: 'LinkedIn posts must be 3,000 characters or fewer.' }, 400)
   }
 
-  const connection = await c.env.DB.prepare(
-    `SELECT member_urn, encrypted_access_token
-     FROM linkedin_connections
-     WHERE id = ? AND token_expires_at > ?`,
-  )
-    .bind(connectionId, Date.now())
-    .first<{member_urn: string; encrypted_access_token: string}>()
+  const connection = await getActiveLinkedInConnection(c.env, connectionId)
 
   if (!connection) {
     return c.json({ error: 'Your LinkedIn connection expired. Reconnect to continue.' }, 401)
@@ -149,6 +157,107 @@ app.post('/linkedin/publish', async (c) => {
   }
 
   return c.json({ published: true, postId: response.headers.get('x-restli-id') })
+})
+
+app.post('/linkedin/publish-image', async (c) => {
+  const form = await c.req.formData()
+  const connectionId = form.get('connectionId')
+  const text = form.get('text')
+  const altText = form.get('altText')
+  const image = form.get('image')
+
+  if (typeof connectionId !== 'string' || typeof text !== 'string' || !text.trim()) {
+    return c.json({ error: 'A connection and post text are required.' }, 400)
+  }
+  if (text.trim().length > 3_000) {
+    return c.json({ error: 'LinkedIn posts must be 3,000 characters or fewer.' }, 400)
+  }
+  if (!(image instanceof File) || !SUPPORTED_IMAGE_TYPES.has(image.type)) {
+    return c.json({ error: 'Choose a PNG or JPEG image.' }, 400)
+  }
+  if (image.size > MAX_IMAGE_SIZE_BYTES) {
+    return c.json({ error: 'Choose an image smaller than 10 MB.' }, 400)
+  }
+  if (typeof altText === 'string' && altText.length > 4_086) {
+    return c.json({ error: 'Image alt text must be 4,086 characters or fewer.' }, 400)
+  }
+
+  const connection = await getActiveLinkedInConnection(c.env, connectionId)
+  if (!connection) {
+    return c.json({ error: 'Your LinkedIn connection expired. Reconnect to continue.' }, 401)
+  }
+
+  const accessToken = await decrypt(connection.encrypted_access_token, c.env.TOKEN_ENCRYPTION_KEY)
+  const imageUpload = await fetch('https://api.linkedin.com/rest/images?action=initializeUpload', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'Linkedin-Version': '202601',
+      'X-Restli-Protocol-Version': '2.0.0',
+    },
+    body: JSON.stringify({
+      initializeUploadRequest: {owner: connection.member_urn},
+    }),
+  })
+
+  if (!imageUpload.ok) {
+    console.error(`LinkedIn image initialization failed with status ${imageUpload.status}.`)
+    return c.json({ error: 'LinkedIn could not prepare this image. Try again shortly.' }, 502)
+  }
+
+  const initialized = await imageUpload.json<InitializeImageUploadResponse>()
+  const uploadUrl = initialized.value?.uploadUrl
+  const imageUrn = initialized.value?.image
+  if (!uploadUrl || !imageUrn) {
+    console.error('LinkedIn image initialization returned an incomplete response.')
+    return c.json({ error: 'LinkedIn could not prepare this image. Try again shortly.' }, 502)
+  }
+
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'PUT',
+    headers: {'Content-Type': image.type},
+    body: await image.arrayBuffer(),
+  })
+  if (!uploadResponse.ok) {
+    console.error(`LinkedIn image upload failed with status ${uploadResponse.status}.`)
+    return c.json({ error: 'LinkedIn could not upload this image. Try again shortly.' }, 502)
+  }
+
+  const postResponse = await fetch('https://api.linkedin.com/rest/posts', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+      'Linkedin-Version': '202601',
+      'X-Restli-Protocol-Version': '2.0.0',
+    },
+    body: JSON.stringify({
+      author: connection.member_urn,
+      commentary: text.trim(),
+      visibility: 'PUBLIC',
+      distribution: {
+        feedDistribution: 'MAIN_FEED',
+        targetEntities: [],
+        thirdPartyDistributionChannels: [],
+      },
+      content: {
+        media: {
+          id: imageUrn,
+          ...(typeof altText === 'string' && altText.trim() ? {altText: altText.trim()} : {}),
+        },
+      },
+      lifecycleState: 'PUBLISHED',
+      isReshareDisabledByAuthor: false,
+    }),
+  })
+
+  if (!postResponse.ok) {
+    console.error(`LinkedIn image post failed with status ${postResponse.status}.`)
+    return c.json({ error: 'LinkedIn could not publish this image post. Try again shortly.' }, 502)
+  }
+
+  return c.json({ published: true, postId: postResponse.headers.get('x-restli-id') })
 })
 
 app.get('/auth/linkedin/start', async (c) => {
@@ -272,6 +381,19 @@ async function getLinkedInProfile(accessToken: string): Promise<LinkedInProfile>
   }
 
   return response.json<LinkedInProfile>()
+}
+
+async function getActiveLinkedInConnection(
+  env: Bindings,
+  connectionId: string,
+): Promise<LinkedInConnection | null> {
+  return env.DB.prepare(
+    `SELECT member_urn, encrypted_access_token
+     FROM linkedin_connections
+     WHERE id = ? AND token_expires_at > ?`,
+  )
+    .bind(connectionId, Date.now())
+    .first<LinkedInConnection>()
 }
 
 async function encrypt(value: string, base64Key: string): Promise<string> {
