@@ -23,6 +23,7 @@ type CodeLorePost = {
 	publishedAt?: number;
 	imagePath?: string;
 	imageName?: string;
+	imageAltText?: string;
 };
 
 const postsKey = 'codelore.posts';
@@ -50,6 +51,13 @@ function postTitle(post: CodeLorePost): string {
 
 function postState(post: CodeLorePost): 'published' | 'draft' {
 	return post.publishedAt ? 'published' : 'draft';
+}
+
+function imageContentType(imagePath: string): string | undefined {
+	const extension = path.extname(imagePath).toLowerCase();
+	if (extension === '.png') return 'image/png';
+	if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+	return undefined;
 }
 
 async function createPost(context: vscode.ExtensionContext): Promise<CodeLorePost> {
@@ -411,7 +419,7 @@ class CodeLoreWorkspacePanel {
 		this.panel.onDidDispose(() => {
 			this.panel = undefined;
 		});
-		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string}) => {
+		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string; altText?: string}) => {
 			if (message.command === 'ready') {
 				await this.refresh();
 				await this.panel?.webview.postMessage({type: 'navigate', view: this.activeView});
@@ -500,14 +508,20 @@ class CodeLoreWorkspacePanel {
 				await updateActivePost(this.context, {
 					imagePath: imageUri.fsPath,
 					imageName: path.basename(imageUri.fsPath),
+					imageAltText: undefined,
 				});
 				await this.refresh('Image attached. It stays local until you publish.');
 				return;
 			}
 
 			if (message.command === 'removeImage') {
-				await updateActivePost(this.context, {imagePath: undefined, imageName: undefined});
+				await updateActivePost(this.context, {imagePath: undefined, imageName: undefined, imageAltText: undefined});
 				await this.refresh('Image removed.');
+				return;
+			}
+
+			if (message.command === 'saveImageAltText') {
+				await updateActivePost(this.context, {imageAltText: message.value?.trim() ?? ''});
 				return;
 			}
 
@@ -517,10 +531,16 @@ class CodeLoreWorkspacePanel {
 					await this.postStatus('Connect LinkedIn and add text before publishing.');
 					return;
 				}
-				await updateActivePost(this.context, message.source === 'draft' ? {draft: message.value.trim()} : {insight: message.value.trim()});
+				const post = await getActivePost(this.context);
+				await updateActivePost(this.context, {
+					...(message.source === 'draft' ? {draft: message.value.trim()} : {insight: message.value.trim()}),
+					...(post.imagePath ? {imageAltText: message.altText?.trim() ?? ''} : {}),
+				});
 				try {
 					await this.postStatus('Publishing to LinkedIn...');
-					const response = await fetch(`${apiBaseUrl}/linkedin/publish`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({connectionId, text: message.value.trim()})});
+					const response = post.imagePath
+						? await this.publishImagePost(connectionId, message.value.trim(), post.imagePath, post.imageName, message.altText)
+						: await fetch(`${apiBaseUrl}/linkedin/publish`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({connectionId, text: message.value.trim()})});
 					const result = (await response.json()) as {published?: boolean; error?: string};
 					if (result.published) await updateActivePost(this.context, {publishedAt: Date.now()});
 					if (!result.published && result.error?.includes('expired')) await this.refresh('Your LinkedIn connection expired. Reconnect from the CodeLore sidebar.');
@@ -528,7 +548,7 @@ class CodeLoreWorkspacePanel {
 					await this.postStatus(result.published ? 'Published to LinkedIn.' : result.error ?? 'LinkedIn could not publish this post.');
 				} catch (error) {
 					console.error('Error publishing to LinkedIn:', error);
-					await this.postStatus('CodeLore could not reach LinkedIn. Try again shortly.');
+					await this.postStatus(error instanceof Error ? error.message : 'CodeLore could not reach LinkedIn. Try again shortly.');
 				}
 			}
 		});
@@ -555,9 +575,38 @@ class CodeLoreWorkspacePanel {
 			draft: post.draft,
 			imageUrl,
 			imageName: post.imageName,
+			imageAltText: post.imageAltText,
 			linkedIn,
 			status,
 		});
+	}
+
+	private async publishImagePost(
+		connectionId: string,
+		text: string,
+		imagePath: string,
+		imageName?: string,
+		altText?: string,
+	): Promise<Response> {
+		const contentType = imageContentType(imagePath);
+		if (!contentType) {
+			throw new Error('CodeLore only supports PNG and JPEG images.');
+		}
+
+		let imageBytes: Uint8Array;
+		try {
+			imageBytes = await vscode.workspace.fs.readFile(vscode.Uri.file(imagePath));
+		} catch {
+			throw new Error('The attached image is no longer available. Add it again.');
+		}
+
+		const form = new FormData();
+		form.append('connectionId', connectionId);
+		form.append('text', text);
+		form.append('altText', altText?.trim() ?? '');
+		form.append('image', new Blob([imageBytes], {type: contentType}), imageName ?? path.basename(imagePath));
+
+		return fetch(`${apiBaseUrl}/linkedin/publish-image`, {method: 'POST', body: form});
 	}
 
 	private getImagePreviewUrl(imagePath?: string): string | undefined {
@@ -626,6 +675,10 @@ class CodeLoreWorkspacePanel {
 			.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
 			.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 14px; white-space: pre-wrap; }
 			#review-image { border-radius: 6px; display: block; margin-top: 20px; max-height: 500px; max-width: 100%; object-fit: contain; }
+			#alt-text-group { margin-top: 16px; }
+			#alt-text-group[hidden] { display: none; }
+			#alt-text-group label { color: var(--vscode-descriptionForeground); display: block; font-size: 12px; margin-bottom: 6px; }
+			#alt-text { background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 4px; box-sizing: border-box; color: var(--vscode-input-foreground); font: inherit; padding: 8px 10px; width: 100%; }
 			@media (max-width: 560px) { main { padding: 28px 20px; } }
 		`;
 	}
@@ -661,6 +714,10 @@ class CodeLoreWorkspacePanel {
 							<div id="review-text"></div>
 							<img id="review-image" alt="Attached image" hidden>
 						</div>
+						<div id="alt-text-group" hidden>
+							<label for="alt-text">Image description <span>(optional)</span></label>
+							<input id="alt-text" type="text" maxlength="4086" placeholder="Describe the image for screen readers">
+						</div>
 						<p class="footer" id="review-account">Checking LinkedIn connection...</p>
 						<button class="secondary" id="back-to-draft">Back to edit</button>
 					</section>
@@ -686,6 +743,8 @@ class CodeLoreWorkspacePanel {
 			const draftActions = document.getElementById('draft-actions');
 			const reviewTextElement = document.getElementById('review-text');
 			const reviewImage = document.getElementById('review-image');
+			const altTextGroup = document.getElementById('alt-text-group');
+			const altTextInput = document.getElementById('alt-text');
 			const reviewAccount = document.getElementById('review-account');
 			const reviewButton = document.getElementById('review-publish');
 			const publishButton = document.getElementById('publish-linkedin');
@@ -718,6 +777,7 @@ class CodeLoreWorkspacePanel {
 				reviewButton.hidden = view === 'publish';
 				publishButton.hidden = view !== 'publish';
 				copyButton.hidden = view === 'publish' || mode !== 'draft';
+				altTextGroup.hidden = view !== 'publish' || !imageUrl;
 				if (view === 'publish') {
 					renderPreview();
 				}
@@ -759,6 +819,9 @@ class CodeLoreWorkspacePanel {
 			document.getElementById('remove-image').addEventListener('click', () => {
 				vscode.postMessage({command: 'removeImage'});
 			});
+			altTextInput.addEventListener('blur', () => {
+				vscode.postMessage({command: 'saveImageAltText', value: altTextInput.value});
+			});
 			document.getElementById('back-to-insight').addEventListener('click', () => {
 				draft = editor.value;
 				showMode('insight');
@@ -786,7 +849,7 @@ class CodeLoreWorkspacePanel {
 
 				publishButton.disabled = true;
 				publishButton.textContent = 'Publishing…';
-				vscode.postMessage({command: 'publishPost', value: reviewText || draft || insight, source: mode});
+				vscode.postMessage({command: 'publishPost', value: reviewText || draft || insight, source: mode, altText: altTextInput.value});
 			});
 
 			window.addEventListener('message', event => {
@@ -796,6 +859,7 @@ class CodeLoreWorkspacePanel {
 					draft = message.draft || '';
 					imageUrl = message.imageUrl || '';
 					imageName = message.imageName || '';
+					altTextInput.value = message.imageAltText || '';
 					if (isGenerating && draft) {
 						isGenerating = false;
 						showMode('draft');
