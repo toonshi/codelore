@@ -533,52 +533,199 @@ class CodeLoreWorkspacePanel {
 	private getHtml(webview: vscode.Webview): string {
 		const nonce = randomUUID();
 		return `<!doctype html>
-<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<style>
-	body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); margin: 0; }
-	.app { min-height: 100vh; }
-	main { box-sizing: border-box; display: flex; flex-direction: column; margin: 0 auto; max-width: 860px; min-height: 100vh; padding: 48px; width: 100%; }
-	.view { display: none; flex: 1; } .view.active { display: block; }
-	h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
-	p { color: var(--vscode-descriptionForeground); line-height: 1.55; margin: 0 0 22px; }
-	textarea { background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; box-sizing: border-box; color: var(--vscode-input-foreground); font: 14px/1.55 var(--vscode-font-family); min-height: 220px; padding: 14px; resize: vertical; width: 100%; }
-	textarea:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--vscode-focusBorder); }
-	.primary { align-self: flex-end; background: var(--vscode-button-background); border: 0; border-radius: 5px; color: var(--vscode-button-foreground); cursor: pointer; font: inherit; margin-top: 16px; padding: 9px 14px; }
-	.primary:hover { background: var(--vscode-button-hoverBackground); } .published { background: var(--vscode-testing-iconPassed) !important; color: var(--vscode-editor-background) !important; }
-	.secondary { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin: 16px 8px 0 0; padding: 9px 14px; }
-	#draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
-	#draft-actions[hidden] { display: none; }
-	.footer-actions { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 24px; }
-	.footer-actions .primary { margin-top: 0; }
-	.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
-	.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 24px; white-space: pre-wrap; }
-	@media (max-width: 560px) { main { padding: 28px 20px; } }
-</style></head>
-<body><div class="app"><main>
-	<section class="view active" id="create"><h1 id="create-title">Share what you learned today</h1><p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p><textarea id="editor" placeholder="Today I learned..."></textarea><div id="insight-actions"><button class="primary" id="generate-draft">Generate LinkedIn draft</button><button class="secondary" id="save-reflection">Save insight</button></div><div id="draft-actions" hidden><button class="secondary" id="back-to-insight">Back to insight</button><button class="secondary" id="regenerate-draft">Regenerate</button><button class="secondary" id="save-draft">Save changes</button><button class="secondary" id="copy-draft">Copy draft</button></div></section>
-	<section class="view" id="publish"><h1>Preview & publish</h1><p>This is the exact text CodeLore will send. Nothing posts automatically.</p><div class="empty" id="review-content"></div><p class="footer" id="review-account">Checking LinkedIn connection...</p><button class="secondary" id="back-to-draft">Back to edit</button></section>
-	<div class="footer" id="status"></div>
-	<div class="footer-actions" id="footer-actions"><button class="primary" id="review-publish">Preview & publish</button><button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button></div>
-</main></div>
-<script nonce="${nonce}">
-	const vscode = acquireVsCodeApi();
-	const editor = document.getElementById('editor'); const status = document.getElementById('status'); const createTitle = document.getElementById('create-title'); const createCopy = document.getElementById('create-copy'); const insightActions = document.getElementById('insight-actions'); const draftActions = document.getElementById('draft-actions'); const footerActions = document.getElementById('footer-actions'); const reviewContent = document.getElementById('review-content'); const reviewAccount = document.getElementById('review-account'); const reviewButton = document.getElementById('review-publish'); const publishButton = document.getElementById('publish-linkedin');
-	let insight = ''; let draft = ''; let reviewText = ''; let mode = 'insight'; let isGenerating = false;
-	function showView(view) { document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view)); reviewButton.hidden = view === 'publish'; publishButton.hidden = view !== 'publish'; if (view === 'publish') reviewContent.textContent = reviewText || draft || insight || 'Write something before you publish.'; }
-	function showMode(nextMode) { mode = nextMode; const isDraft = mode === 'draft'; createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'Share what you learned today'; createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.'; editor.value = isDraft ? draft : insight; editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'Today I learned...'; insightActions.hidden = isDraft; draftActions.hidden = !isDraft; }
-	document.getElementById('save-reflection').addEventListener('click', () => vscode.postMessage({command: 'saveReflection', value: editor.value}));
-	document.getElementById('generate-draft').addEventListener('click', () => { insight = editor.value; isGenerating = true; vscode.postMessage({command: 'generateDraft', value: insight}); });
-	document.getElementById('regenerate-draft').addEventListener('click', () => { isGenerating = true; vscode.postMessage({command: 'generateDraft', value: insight}); });
-	document.getElementById('save-draft').addEventListener('click', () => vscode.postMessage({command: 'saveDraft', value: editor.value}));
-	document.getElementById('copy-draft').addEventListener('click', () => vscode.postMessage({command: 'copyDraft'}));
-	document.getElementById('back-to-insight').addEventListener('click', () => { draft = editor.value; showMode('insight'); });
-	reviewButton.addEventListener('click', () => { if (mode === 'draft') draft = editor.value; else insight = editor.value; reviewText = editor.value; showView('publish'); });
-	document.getElementById('back-to-draft').addEventListener('click', () => { showView('create'); showMode('draft'); });
-	publishButton.addEventListener('click', () => { if (publishButton.dataset.confirm !== 'true') { publishButton.dataset.confirm = 'true'; publishButton.textContent = 'Confirm publish to LinkedIn'; status.textContent = 'This will publish publicly to LinkedIn.'; return; } publishButton.disabled = true; publishButton.textContent = 'Publishing…'; vscode.postMessage({command: 'publishPost', value: reviewText || draft || insight, source: mode}); });
-	window.addEventListener('message', event => { const message = event.data; if (message.type === 'state') { insight = message.reflection || ''; draft = message.draft || ''; if (isGenerating && draft) { isGenerating = false; showMode('draft'); } else { showMode(mode); } reviewAccount.textContent = message.linkedIn?.connected ? message.linkedIn.displayName || 'LinkedIn connected' : 'Connect LinkedIn before publishing.'; publishButton.disabled = !message.linkedIn?.connected; status.textContent = message.status || ''; } if (message.type === 'status') status.textContent = message.status; if (message.type === 'publishResult') { publishButton.textContent = message.published ? 'Published ✓' : 'Couldn’t publish'; publishButton.classList.toggle('published', message.published); publishButton.disabled = true; } if (message.type === 'navigate') showView(message.view); });
-	vscode.postMessage({command: 'ready'});
-</script></body></html>`;
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+	<style>${this.workspaceStyles()}</style>
+</head>
+<body>
+	${this.workspaceMarkup()}
+	<script nonce="${nonce}">${this.workspaceScript()}</script>
+</body>
+</html>`;
+	}
+
+	private workspaceStyles(): string {
+		return `
+			body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); margin: 0; }
+			.app { min-height: 100vh; }
+			main { box-sizing: border-box; display: flex; flex-direction: column; margin: 0 auto; max-width: 860px; min-height: 100vh; padding: 48px; width: 100%; }
+			.view { display: none; flex: 1; }
+			.view.active { display: block; }
+			h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
+			p { color: var(--vscode-descriptionForeground); line-height: 1.55; margin: 0 0 22px; }
+			textarea { background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; box-sizing: border-box; color: var(--vscode-input-foreground); font: 14px/1.55 var(--vscode-font-family); min-height: 220px; padding: 14px; resize: vertical; width: 100%; }
+			textarea:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--vscode-focusBorder); }
+			.primary { align-self: flex-end; background: var(--vscode-button-background); border: 0; border-radius: 5px; color: var(--vscode-button-foreground); cursor: pointer; font: inherit; margin-top: 16px; padding: 9px 14px; }
+			.primary:hover { background: var(--vscode-button-hoverBackground); }
+			.published { background: var(--vscode-testing-iconPassed) !important; color: var(--vscode-editor-background) !important; }
+			.secondary { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin: 16px 8px 0 0; padding: 9px 14px; }
+			#draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
+			#draft-actions[hidden] { display: none; }
+			.footer-actions { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 24px; }
+			.footer-actions .primary { margin-top: 0; }
+			.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
+			.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 24px; white-space: pre-wrap; }
+			@media (max-width: 560px) { main { padding: 28px 20px; } }
+		`;
+	}
+
+	private workspaceMarkup(): string {
+		return `
+			<div class="app">
+				<main>
+					<section class="view active" id="create">
+						<h1 id="create-title">Share what you learned today</h1>
+						<p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p>
+						<textarea id="editor" placeholder="Today I learned..."></textarea>
+						<div id="insight-actions">
+							<button class="primary" id="generate-draft">Generate LinkedIn draft</button>
+							<button class="secondary" id="save-reflection">Save insight</button>
+						</div>
+						<div id="draft-actions" hidden>
+							<button class="secondary" id="back-to-insight">Back to insight</button>
+							<button class="secondary" id="regenerate-draft">Regenerate</button>
+							<button class="secondary" id="save-draft">Save changes</button>
+							<button class="secondary" id="copy-draft">Copy draft</button>
+						</div>
+					</section>
+					<section class="view" id="publish">
+						<h1>Preview & publish</h1>
+						<p>This is the exact text CodeLore will send. Nothing posts automatically.</p>
+						<div class="empty" id="review-content"></div>
+						<p class="footer" id="review-account">Checking LinkedIn connection...</p>
+						<button class="secondary" id="back-to-draft">Back to edit</button>
+					</section>
+					<div class="footer" id="status"></div>
+					<div class="footer-actions" id="footer-actions">
+						<button class="primary" id="review-publish">Preview & publish</button>
+						<button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button>
+					</div>
+				</main>
+			</div>
+		`;
+	}
+
+	private workspaceScript(): string {
+		return `
+			const vscode = acquireVsCodeApi();
+			const editor = document.getElementById('editor');
+			const status = document.getElementById('status');
+			const createTitle = document.getElementById('create-title');
+			const createCopy = document.getElementById('create-copy');
+			const insightActions = document.getElementById('insight-actions');
+			const draftActions = document.getElementById('draft-actions');
+			const reviewContent = document.getElementById('review-content');
+			const reviewAccount = document.getElementById('review-account');
+			const reviewButton = document.getElementById('review-publish');
+			const publishButton = document.getElementById('publish-linkedin');
+
+			let insight = '';
+			let draft = '';
+			let reviewText = '';
+			let mode = 'insight';
+			let isGenerating = false;
+
+			function showView(view) {
+				document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view));
+				reviewButton.hidden = view === 'publish';
+				publishButton.hidden = view !== 'publish';
+				if (view === 'publish') {
+					reviewContent.textContent = reviewText || draft || insight || 'Write something before you publish.';
+				}
+			}
+
+			function showMode(nextMode) {
+				mode = nextMode;
+				const isDraft = mode === 'draft';
+				createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'Share what you learned today';
+				createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.';
+				editor.value = isDraft ? draft : insight;
+				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'Today I learned...';
+				insightActions.hidden = isDraft;
+				draftActions.hidden = !isDraft;
+			}
+
+			document.getElementById('save-reflection').addEventListener('click', () => {
+				vscode.postMessage({command: 'saveReflection', value: editor.value});
+			});
+			document.getElementById('generate-draft').addEventListener('click', () => {
+				insight = editor.value;
+				isGenerating = true;
+				vscode.postMessage({command: 'generateDraft', value: insight});
+			});
+			document.getElementById('regenerate-draft').addEventListener('click', () => {
+				isGenerating = true;
+				vscode.postMessage({command: 'generateDraft', value: insight});
+			});
+			document.getElementById('save-draft').addEventListener('click', () => {
+				vscode.postMessage({command: 'saveDraft', value: editor.value});
+			});
+			document.getElementById('copy-draft').addEventListener('click', () => {
+				vscode.postMessage({command: 'copyDraft'});
+			});
+			document.getElementById('back-to-insight').addEventListener('click', () => {
+				draft = editor.value;
+				showMode('insight');
+			});
+			reviewButton.addEventListener('click', () => {
+				if (mode === 'draft') {
+					draft = editor.value;
+				} else {
+					insight = editor.value;
+				}
+				reviewText = editor.value;
+				showView('publish');
+			});
+			document.getElementById('back-to-draft').addEventListener('click', () => {
+				showView('create');
+				showMode('draft');
+			});
+			publishButton.addEventListener('click', () => {
+				if (publishButton.dataset.confirm !== 'true') {
+					publishButton.dataset.confirm = 'true';
+					publishButton.textContent = 'Confirm publish to LinkedIn';
+					status.textContent = 'This will publish publicly to LinkedIn.';
+					return;
+				}
+
+				publishButton.disabled = true;
+				publishButton.textContent = 'Publishing…';
+				vscode.postMessage({command: 'publishPost', value: reviewText || draft || insight, source: mode});
+			});
+
+			window.addEventListener('message', event => {
+				const message = event.data;
+				if (message.type === 'state') {
+					insight = message.reflection || '';
+					draft = message.draft || '';
+					if (isGenerating && draft) {
+						isGenerating = false;
+						showMode('draft');
+					} else {
+						showMode(mode);
+					}
+					reviewAccount.textContent = message.linkedIn?.connected ? message.linkedIn.displayName || 'LinkedIn connected' : 'Connect LinkedIn before publishing.';
+					publishButton.disabled = !message.linkedIn?.connected;
+					status.textContent = message.status || '';
+				}
+				if (message.type === 'status') {
+					status.textContent = message.status;
+				}
+				if (message.type === 'publishResult') {
+					publishButton.textContent = message.published ? 'Published ✓' : 'Couldn’t publish';
+					publishButton.classList.toggle('published', message.published);
+					publishButton.disabled = true;
+				}
+				if (message.type === 'navigate') {
+					showView(message.view);
+				}
+			});
+
+			vscode.postMessage({command: 'ready'});
+		`;
 	}
 }
 
