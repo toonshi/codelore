@@ -66,6 +66,7 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
+    "test:unit": "npm run compile && mocha out/test/git-context.test.js --ui tdd --reporter spec",
     "lint": "eslint src",
     "test": "vscode-test"
   },
