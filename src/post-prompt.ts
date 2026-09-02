@@ -14,10 +14,17 @@ export type PostDraftOption = {
 	draft: string;
 };
 
+const angleLabels: Record<DraftOptionAngle, string> = {
+	feature: 'Feature',
+	bug: 'Problem solved',
+	lesson: 'Lesson learned',
+	'build-log': 'Build log',
+};
+
 export function buildDraftPrompt({manualInsight, gitContext, platform}: DraftPromptOptions): string {
 	const platformInstruction = platform === 'x'
 		? 'Write one X post under 280 characters.'
-		: 'Write a LinkedIn update between 60 and 130 words.';
+		: 'Write a LinkedIn update between 45 and 100 words.';
 	const context = [
 		manualInsight ? `What I want to say:\n${manualInsight}` : '',
 		gitContext ? `Latest commit:\n${gitContext.commitMessage}` : '',
@@ -27,10 +34,12 @@ export function buildDraftPrompt({manualInsight, gitContext, platform}: DraftPro
 
 	return [
 		platformInstruction,
-		'Write like a developer sharing a real update with other developers.',
-		'Start with the concrete thing that changed. Then mention one useful detail, decision, problem, or lesson from the supplied context.',
-		'Use short paragraphs and plain language. A direct, slightly unfinished-sounding update is better than polished marketing copy.',
-		'Do not invent facts, feelings, collaborators, impact, or lessons.',
+		'Write like a developer sharing a real update with other developers, not an announcement or a changelog.',
+		'Build a small story: open with the concrete thing that changed or the problem being worked through, add one useful detail, then stop when the thought is complete.',
+		'Use short paragraphs and plain language. A direct, slightly unfinished-sounding update is better than polished marketing copy or a tidy moral.',
+		'Every claim must be supported by the supplied context. Do not invent facts, feelings, collaborators, user impact, tradeoffs, or lessons.',
+		'Do not force a lesson. If there is no real lesson in the context, leave it out.',
+		'Do not use generic update templates such as "Just wrapped up", "One challenge was", or "It’s a reminder".',
 		'Do not use these phrases or their close cousins: "journey", "grateful", "excited", "dive deep", "the importance of", "collaboration was key", "making an impact", "not just", or "I look forward to".',
 		'Do not add a call to action. Use no hashtags unless the author explicitly asks for them.',
 		'Return only the post text. Do not add a title, commentary, or Markdown code fence.',
@@ -40,15 +49,25 @@ export function buildDraftPrompt({manualInsight, gitContext, platform}: DraftPro
 }
 
 export function buildDraftOptionsPrompt(options: DraftPromptOptions): string {
+	const hasManualInsight = Boolean(options.manualInsight?.trim());
+	const allowedAngles = hasManualInsight
+		? 'feature, bug, lesson, build-log'
+		: 'feature, build-log';
+	const optionCount = hasManualInsight
+		? 'Create two or three distinct post options. Each option must use a different supported angle.'
+		: 'Create exactly two distinct post options: one feature and one build-log.';
+
 	return [
 		buildDraftPrompt(options),
 		'',
-		'Create two or three distinct post options, each based on a different supported angle.',
-		'Allowed angles are: feature, bug, lesson, build-log.',
-		'Only include an angle if the supplied context supports it. Do not invent a bug, a lesson, or a decision.',
+		optionCount,
+		`Allowed angles are: ${allowedAngles}. Use only angles the supplied context genuinely supports.`,
+		'Feature means a concrete capability or improvement. Bug means a real problem that was fixed. Lesson means a specific engineering idea learned or applied. Build log is a direct work-in-progress update without a forced lesson.',
+		'Only include an angle if the supplied context supports it. Do not invent a bug, a lesson, a decision, or an outcome.',
 		'Commit titles are source material, not post language. Never say "merged PR", mention a commit, mention a pull request, list file counts, or say "N files changed".',
 		'If the author wrote an insight, treat it as the strongest source of their voice and intent.',
-		'Return only a JSON array. Each item must have exactly: angle, label, draft. Use a brief human label such as "New feature" or "Problem solved".',
+		'Use these labels: "Feature", "Problem solved", "Lesson learned", or "Build log". Do not reuse a label.',
+		'Return only a JSON array. Each item must have exactly: angle, label, draft. No Markdown or extra commentary.',
 	].join('\n');
 }
 
@@ -59,8 +78,8 @@ export function parseDraftOptions(response: string): PostDraftOption[] {
 		if (!Array.isArray(value)) return [];
 		return value
 			.filter(isPostDraftOption)
-			.map((option) => ({...option, label: option.label.trim(), draft: option.draft.trim()}))
-			.filter((option) => option.label && option.draft)
+			.map((option) => ({...option, label: angleLabels[option.angle], draft: option.draft.trim()}))
+			.filter((option) => option.draft)
 			.slice(0, 3);
 	} catch {
 		return [];
