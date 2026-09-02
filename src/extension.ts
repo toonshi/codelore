@@ -4,6 +4,8 @@ import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
+import {collectCommitContext, collectLatestCommitContext, listRecentCommits, type GitCommitContext} from './git-context';
+import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions, type PostDraftOption} from './post-prompt';
 
 const execFileAsync = promisify(execFile);
 const apiBaseUrl = 'https://codelore-api.codelore.workers.dev';
@@ -24,6 +26,7 @@ type CodeLorePost = {
 	imagePath?: string;
 	imageName?: string;
 	imageAltText?: string;
+	commitIds?: string[];
 };
 
 const postsKey = 'codelore.posts';
@@ -91,6 +94,30 @@ async function updateActivePost(context: vscode.ExtensionContext, changes: Parti
 	return updated;
 }
 
+async function createDraftPostsFromOptions(
+	context: vscode.ExtensionContext,
+	drafts: string[],
+): Promise<CodeLorePost[]> {
+	const active = await getActivePost(context);
+	const posts = await getPosts(context);
+	const now = Date.now();
+	const created = drafts.map((draft, index) => ({
+		...active,
+		id: index === 0 ? active.id : randomUUID(),
+		draft,
+		createdAt: index === 0 ? active.createdAt : now,
+		updatedAt: now,
+		publishedAt: undefined,
+		imagePath: undefined,
+		imageName: undefined,
+		imageAltText: undefined,
+	}));
+	await context.workspaceState.update(postsKey, [...created, ...posts.filter((post) => post.id !== active.id)]);
+	await context.workspaceState.update(activePostKey, created[0].id);
+	await context.workspaceState.update('codelore.latestDraft', created[0].draft);
+	return created;
+}
+
 async function getLinkedInStatus(connectionId: string): Promise<LinkedInStatus> {
 	const response = await fetch(
 		`${apiBaseUrl}/auth/linkedin/status?connection_id=${encodeURIComponent(connectionId)}`,
@@ -127,11 +154,33 @@ async function getLatestCommitMessage(): Promise<string | undefined> {
 	}
 }
 
+async function collectWorkspaceGitContext(commitIds?: string[]): Promise<GitCommitContext | undefined> {
+	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+	if (!workspaceFolder) return undefined;
+
+	const runGit = async (args: string[], cwd: string) => {
+		const {stdout} = await execFileAsync('git', args, {cwd});
+		return stdout;
+	};
+	return commitIds !== undefined
+		? collectCommitContext(workspaceFolder.uri.fsPath, commitIds, runGit)
+		: collectLatestCommitContext(workspaceFolder.uri.fsPath, runGit);
+}
+
+async function listWorkspaceCommits() {
+	const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+	if (!workspaceFolder) return [];
+	return listRecentCommits(workspaceFolder.uri.fsPath, async (args, cwd) => {
+		const {stdout} = await execFileAsync('git', args, {cwd});
+		return stdout;
+	});
+}
+
 
 async function generateAiPostDraft(
-	reflection: string,
+	manualInsight: string | undefined,
 	platform: 'linkedin' | 'x',
-	latestCommitMessage?: string,
+	gitContext?: GitCommitContext,
 ): Promise<string | undefined> {
 	const [model] = await vscode.lm.selectChatModels({
 		vendor: 'copilot',
@@ -142,28 +191,9 @@ async function generateAiPostDraft(
 		return undefined;
 	}
 
-	const selectedContext = latestCommitMessage
-		? `Latest commit:\n${latestCommitMessage}\n\nReflection:\n${reflection}`
-		: `Reflection:\n${reflection}`;
-
-
-	const platformInstructions =
-	     platform === 'x'
-		 ? 'Write one X post under 280 characters. Make it sharp and direct.'
-		 : 'Write a Linkedin post between 100 and 180 words. Make it thoughtful and easy to read.';
 	const messages = [
 		vscode.LanguageModelChatMessage.User(
-			[
-				platformInstructions,
-				'Only use the facts in the provided context. Do not make up any facts.',
-				'Make it personal, concise, authentic and natural.',
-				'Focus on what the developer learned, or why the work mattered.',
-				'Return only the post text. Do not add a title, commentary, or Markdown code fence.',
-				'Use at most three relevant hashtags.',
-				'',
-				selectedContext,
-
-			].join('\n'),
+			buildDraftPrompt({manualInsight, platform, gitContext}),
 		),
 	];
 
@@ -187,6 +217,53 @@ async function generateAiPostDraft(
 	cancelllation.dispose();
 }
 
+}
+
+async function generateAiPostOptions(
+	manualInsight: string | undefined,
+	platform: 'linkedin' | 'x',
+	gitContext?: GitCommitContext,
+): Promise<PostDraftOption[]> {
+	const [model] = await vscode.lm.selectChatModels({vendor: 'copilot'});
+	if (!model) return [];
+
+	const cancellation = new vscode.CancellationTokenSource();
+	try {
+		const response = await model.sendRequest(
+			[vscode.LanguageModelChatMessage.User(buildDraftOptionsPrompt({manualInsight, platform, gitContext}))],
+			{},
+			cancellation.token,
+		);
+		let text = '';
+		for await (const fragment of response.text) text += fragment;
+		return parseDraftOptions(text);
+	} finally {
+		cancellation.dispose();
+	}
+}
+
+async function generateAiCombinedDraft(
+	options: PostDraftOption[],
+	manualInsight: string | undefined,
+	platform: 'linkedin' | 'x',
+	gitContext?: GitCommitContext,
+): Promise<string | undefined> {
+	const [model] = await vscode.lm.selectChatModels({vendor: 'copilot'});
+	if (!model) return undefined;
+
+	const cancellation = new vscode.CancellationTokenSource();
+	try {
+		const response = await model.sendRequest(
+			[vscode.LanguageModelChatMessage.User(buildCombinedDraftPrompt(options, {manualInsight, platform, gitContext}))],
+			{},
+			cancellation.token,
+		);
+		let text = '';
+		for await (const fragment of response.text) text += fragment;
+		return text.trim() || undefined;
+	} finally {
+		cancellation.dispose();
+	}
 }
 
 
@@ -398,7 +475,10 @@ class CodeLoreWorkspacePanel {
 	private panel: vscode.WebviewPanel | undefined;
 	private activeView: 'create' | 'publish' = 'create';
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	constructor(
+		private readonly context: vscode.ExtensionContext,
+		private readonly refreshSidebar: () => Promise<void>,
+	) {}
 
 	open(view: 'create' | 'publish' = 'create'): void {
 		this.activeView = view;
@@ -419,7 +499,7 @@ class CodeLoreWorkspacePanel {
 		this.panel.onDidDispose(() => {
 			this.panel = undefined;
 		});
-		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string; altText?: string}) => {
+		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string; altText?: string; commitIds?: string[]; drafts?: string[]; options?: PostDraftOption[]}) => {
 			if (message.command === 'ready') {
 				await this.refresh();
 				await this.panel?.webview.postMessage({type: 'navigate', view: this.activeView});
@@ -440,26 +520,32 @@ class CodeLoreWorkspacePanel {
 
 			if (message.command === 'generateDraft') {
 				const writtenInsight = message.value?.trim();
-				const latestCommitMessage = await getLatestCommitMessage();
-				const reflection = writtenInsight || latestCommitMessage;
+				const post = await getActivePost(this.context);
+				const gitContext = await collectWorkspaceGitContext(post.commitIds);
+				const reflection = writtenInsight || gitContext?.commitMessage;
 				if (!reflection) {
 					await this.postStatus('Write an insight or make a Git commit first.');
 					return;
 				}
-				await updateActivePost(this.context, {insight: reflection});
+				await updateActivePost(this.context, {insight: writtenInsight ?? ''});
 
 				await this.postStatus(writtenInsight ? 'Writing your LinkedIn draft...' : 'Using your latest commit to write a LinkedIn draft...');
 				const fallbackDraft = [
-					latestCommitMessage
-						? `Today I worked on: ${latestCommitMessage}`
+					gitContext?.commitMessage
+						? `Shipped: ${gitContext.commitMessage}`
 						: 'Today I learned something while building:',
 					...(writtenInsight ? ['', reflection] : []),
 					'',
-					'#buildinpublic #devjourney #CodeLore',
 				].join('\n');
 
 				try {
-					const draft = await generateAiPostDraft(reflection, 'linkedin', writtenInsight ? latestCommitMessage : undefined) ?? fallbackDraft;
+					const options = await generateAiPostOptions(writtenInsight, 'linkedin', gitContext);
+					if (options.length) {
+						await this.panel?.webview.postMessage({type: 'draftOptions', options});
+						await this.postStatus('Choose a direction to keep editing.');
+						return;
+					}
+					const draft = await generateAiPostDraft(writtenInsight, 'linkedin', gitContext) ?? fallbackDraft;
 					await updateActivePost(this.context, {draft});
 					await this.refresh('Draft ready for your review.');
 				} catch (error) {
@@ -467,6 +553,44 @@ class CodeLoreWorkspacePanel {
 					await updateActivePost(this.context, {draft: fallbackDraft});
 					await this.refresh('Copilot was unavailable, so CodeLore made a simple draft.');
 				}
+				return;
+			}
+
+			if (message.command === 'chooseDraftOption') {
+				await updateActivePost(this.context, {draft: message.value?.trim() ?? ''});
+				await this.refresh('Draft ready for your review.');
+				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
+				return;
+			}
+
+			if (message.command === 'createDraftOptions') {
+				const drafts = message.drafts?.map((draft) => draft.trim()).filter(Boolean) ?? [];
+				if (!drafts.length) return;
+				await createDraftPostsFromOptions(this.context, drafts);
+				await this.refresh(drafts.length === 1 ? 'Draft ready for your review.' : `${drafts.length} drafts created.`);
+				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
+				return;
+			}
+
+			if (message.command === 'combineDraftOptions') {
+				const options = message.options?.filter((option) => option?.draft?.trim() && option?.label?.trim()) ?? [];
+				if (options.length < 2) {
+					await this.postStatus('Choose at least two directions to create one story.');
+					return;
+				}
+				const post = await getActivePost(this.context);
+				const gitContext = await collectWorkspaceGitContext(post.commitIds);
+				await this.postStatus('Writing one story from your selected directions...');
+				const draft = await generateAiCombinedDraft(options, message.value?.trim() || post.insight, 'linkedin', gitContext) ?? options[0].draft;
+				await updateActivePost(this.context, {draft});
+				await this.refresh('Combined draft ready for your review.');
+				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
+				return;
+			}
+
+			if (message.command === 'saveCommitSelection') {
+				await updateActivePost(this.context, {commitIds: message.commitIds ?? []});
+				await this.refresh('Work context updated.');
 				return;
 			}
 
@@ -561,7 +685,10 @@ class CodeLoreWorkspacePanel {
 		}
 
 		const post = await getActivePost(this.context);
+		const commits = await listWorkspaceCommits();
+		const selectedCommitIds = post.commitIds ?? commits.slice(0, 1).map((commit) => commit.id);
 		const imageUrl = this.getImagePreviewUrl(post.imagePath);
+		const gitContext = await collectWorkspaceGitContext(selectedCommitIds);
 		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
 		let linkedIn: LinkedInStatus = {connected: false};
 		try {
@@ -576,9 +703,18 @@ class CodeLoreWorkspacePanel {
 			imageUrl,
 			imageName: post.imageName,
 			imageAltText: post.imageAltText,
+			gitContext: gitContext && {
+				commitMessage: gitContext.commitMessage,
+				changedFiles: gitContext.changedFiles,
+				fileCount: gitContext.fileCount,
+				stats: gitContext.stats,
+			},
+			commits,
+			selectedCommitIds,
 			linkedIn,
 			status,
 		});
+		await this.refreshSidebar();
 	}
 
 	private async publishImagePost(
@@ -664,6 +800,41 @@ class CodeLoreWorkspacePanel {
 			#media-actions { align-items: center; display: flex; flex-wrap: wrap; margin-left: auto; }
 			#media-actions .secondary { margin-right: 0; }
 			#remove-image { margin: 16px 0 0 6px; }
+			#git-context { align-items: center; color: var(--vscode-descriptionForeground); display: flex; font-size: 12px; gap: 8px; margin-top: 10px; }
+			#git-context[hidden] { display: none; }
+			.context-link { background: transparent; border: 0; color: var(--vscode-textLink-foreground); cursor: pointer; font: inherit; padding: 0; }
+			.context-link:hover { color: var(--vscode-textLink-activeForeground); text-decoration: underline; }
+			#commit-picker { background: color-mix(in srgb, var(--vscode-editor-background) 76%, transparent); inset: 0; padding: 20px; position: fixed; z-index: 5; }
+			#commit-picker[hidden] { display: none; }
+			.picker-card { background: var(--vscode-editor-background); border: 1px solid var(--vscode-editorWidget-border); border-radius: 7px; box-shadow: 0 10px 28px rgba(0, 0, 0, .35); margin: 8vh auto 0; max-width: 620px; }
+			.picker-head, .picker-footer { padding: 16px 18px; }
+			.picker-head { border-bottom: 1px solid var(--vscode-editorWidget-border); }
+			.picker-head h2 { font-size: 16px; margin: 0 0 5px; }
+			.picker-head p { font-size: 12px; margin: 0; }
+			#commit-list { max-height: 340px; overflow-y: auto; padding: 8px; }
+			.commit-option { align-items: flex-start; border-radius: 4px; cursor: pointer; display: flex; gap: 10px; padding: 9px 10px; }
+			.commit-option:hover { background: var(--vscode-list-hoverBackground); }
+			.commit-option input { appearance: none; background: var(--vscode-checkbox-background); border: 1px solid var(--vscode-checkbox-border); border-radius: 2px; height: 13px; margin-top: 3px; position: relative; width: 13px; }
+			.commit-option input:checked { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
+			.commit-option input:checked::after { border: solid var(--vscode-button-foreground); border-width: 0 2px 2px 0; content: ''; height: 6px; left: 3px; position: absolute; top: 1px; transform: rotate(45deg); width: 3px; }
+			.commit-option input:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
+			.commit-option strong { display: block; font-weight: 500; }
+			.commit-option span { color: var(--vscode-descriptionForeground); display: block; font-size: 12px; margin-top: 2px; }
+			.picker-footer { align-items: center; border-top: 1px solid var(--vscode-editorWidget-border); display: flex; }
+			#commit-count { color: var(--vscode-descriptionForeground); flex: 1; font-size: 12px; }
+			.picker-footer .secondary, .picker-footer .primary { margin-top: 0; }
+			#draft-options { display: grid; gap: 12px; }
+			.draft-option { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 7px; cursor: pointer; padding: 14px; }
+			.draft-option:hover { border-color: var(--vscode-focusBorder); }
+			.draft-option-header { align-items: center; display: flex; gap: 9px; margin-bottom: 8px; }
+			.draft-option-header h2 { flex: 1; font-size: 13px; font-weight: 600; margin: 0; }
+			.option-checkbox { appearance: none; background: var(--vscode-checkbox-background); border: 1px solid var(--vscode-checkbox-border); border-radius: 2px; height: 13px; position: relative; width: 13px; }
+			.option-checkbox:checked { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
+			.option-checkbox:checked::after { border: solid var(--vscode-button-foreground); border-width: 0 2px 2px 0; content: ''; height: 6px; left: 3px; position: absolute; top: 1px; transform: rotate(45deg); width: 3px; }
+			.draft-option p { color: var(--vscode-editor-foreground); font-size: 13px; margin: 0 0 12px; white-space: pre-wrap; }
+			.option-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+			.option-actions .secondary, .option-actions .primary { margin: 0; }
+			.option-actions span { color: var(--vscode-descriptionForeground); flex: 1; font-size: 12px; }
 			.icon-button { background: transparent; border: 0; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 2px; }
 			.icon-button:hover { color: var(--vscode-editor-foreground); }
 			.icon-button svg { display: block; height: 14px; width: 14px; }
@@ -689,15 +860,20 @@ class CodeLoreWorkspacePanel {
 				<main>
 					<section class="view active" id="create">
 						<h1 id="create-title">Share what you learned today</h1>
-						<p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p>
-						<textarea id="editor" placeholder="Today I learned..."></textarea>
+						<p id="create-copy">Choose the commits, then add what you learned or decided. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p>
+						<textarea id="editor" placeholder="What did you learn or decide?"></textarea>
+						<div id="git-context" hidden>
+							<span id="git-context-summary"></span>
+							<button class="context-link" id="choose-commits" type="button">Choose commits</button>
+						</div>
 						<div id="editor-actions">
 							<div id="insight-actions">
 								<button class="primary" id="generate-draft">Generate LinkedIn draft</button>
 								<button class="secondary" id="save-reflection">Save insight</button>
 							</div>
-							<div id="draft-actions" hidden>
-								<button class="secondary" id="back-to-insight">Back to insight</button>
+						<div id="draft-actions" hidden>
+							<button class="secondary" id="back-to-options" hidden>Back to options</button>
+							<button class="secondary" id="edit-input">Edit input</button>
 								<button class="secondary" id="regenerate-draft">Regenerate</button>
 								<button class="secondary" id="save-draft">Save changes</button>
 							</div>
@@ -721,12 +897,25 @@ class CodeLoreWorkspacePanel {
 						<p class="footer" id="review-account">Checking LinkedIn connection...</p>
 						<button class="secondary" id="back-to-draft">Back to edit</button>
 					</section>
+					<section class="view" id="options">
+						<h1>Pick what to share</h1>
+						<p>Choose one or more directions from the work you selected.</p>
+						<div id="draft-options"></div>
+						<div class="option-actions"><span id="option-selection-count">No options selected</span><button class="secondary" id="create-separate-drafts" disabled>Create separate drafts</button><button class="primary" id="create-combined-draft" disabled>Create one story</button></div>
+					</section>
 					<div class="footer" id="status"></div>
-					<div class="footer-actions" id="footer-actions">
+						<div class="footer-actions" id="footer-actions">
 						<button class="secondary copy-button" id="copy-draft" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M3 1h8v2H5v8H3V1zm3 4h7v10H6V5zm1 1v8h5V6H7z"/></svg><span>Copy draft</span></button>
 						<button class="primary" id="review-publish">Preview & publish</button>
 						<button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button>
-					</div>
+						</div>
+						<div id="commit-picker" hidden>
+							<div class="picker-card" role="dialog" aria-modal="true" aria-labelledby="commit-picker-title">
+								<div class="picker-head"><h2 id="commit-picker-title">Choose the work to include</h2><p>Select every commit that belongs to this story.</p></div>
+								<div id="commit-list"></div>
+								<div class="picker-footer"><span id="commit-count"></span><button class="secondary" id="cancel-commits">Cancel</button><button class="primary" id="apply-commits">Use selected commits</button></div>
+							</div>
+						</div>
 				</main>
 			</div>
 		`;
@@ -741,6 +930,7 @@ class CodeLoreWorkspacePanel {
 			const createCopy = document.getElementById('create-copy');
 			const insightActions = document.getElementById('insight-actions');
 			const draftActions = document.getElementById('draft-actions');
+			const backToOptionsButton = document.getElementById('back-to-options');
 			const reviewTextElement = document.getElementById('review-text');
 			const reviewImage = document.getElementById('review-image');
 			const altTextGroup = document.getElementById('alt-text-group');
@@ -751,6 +941,16 @@ class CodeLoreWorkspacePanel {
 			const copyButton = document.getElementById('copy-draft');
 			const selectImageButton = document.getElementById('select-image');
 			const removeImageButton = document.getElementById('remove-image');
+			const gitContextElement = document.getElementById('git-context');
+			const gitContextSummary = document.getElementById('git-context-summary');
+			const chooseCommitsButton = document.getElementById('choose-commits');
+			const commitPicker = document.getElementById('commit-picker');
+			const commitList = document.getElementById('commit-list');
+			const commitCount = document.getElementById('commit-count');
+			const draftOptionsElement = document.getElementById('draft-options');
+			const optionSelectionCount = document.getElementById('option-selection-count');
+			const separateDraftsButton = document.getElementById('create-separate-drafts');
+			const createCombinedDraftButton = document.getElementById('create-combined-draft');
 
 			let insight = '';
 			let draft = '';
@@ -759,6 +959,102 @@ class CodeLoreWorkspacePanel {
 			let imageName = '';
 			let mode = 'insight';
 			let isGenerating = false;
+			let gitContext;
+			let commits = [];
+			let selectedCommitIds = [];
+			let savedCommitIds = [];
+			let draftOptions = [];
+			let selectedDraftOptionIndexes = [];
+
+			function renderGitContext() {
+				const hasCommits = commits.length > 0;
+				gitContextElement.hidden = !hasCommits;
+				const hasContext = Boolean(gitContext?.commitMessage);
+				if (!hasContext) {
+					gitContextSummary.textContent = 'Context: no commits selected';
+					return;
+				}
+
+				const commitLabel = selectedCommitIds.length === 1 ? 'commit' : 'commits';
+				const fileLabel = gitContext.fileCount === 1 ? 'file changed' : 'files changed';
+				gitContextSummary.textContent = 'Context: ' + selectedCommitIds.length + ' ' + commitLabel + ' · ' + gitContext.fileCount + ' ' + fileLabel;
+			}
+
+			function renderCommitPicker() {
+				commitList.replaceChildren();
+				commits.forEach(commit => {
+					const row = document.createElement('label');
+					row.className = 'commit-option';
+					const checkbox = document.createElement('input');
+					checkbox.type = 'checkbox';
+					checkbox.checked = selectedCommitIds.includes(commit.id);
+					checkbox.addEventListener('change', () => {
+						selectedCommitIds = checkbox.checked
+							? [...selectedCommitIds, commit.id]
+							: selectedCommitIds.filter(id => id !== commit.id);
+						renderCommitCount();
+					});
+					const copy = document.createElement('div');
+					const title = document.createElement('strong');
+					title.textContent = commit.title;
+					const meta = document.createElement('span');
+					meta.textContent = commit.date + ' · ' + commit.fileCount + (commit.fileCount === 1 ? ' file changed' : ' files changed');
+					copy.append(title, meta);
+					row.append(checkbox, copy);
+					commitList.appendChild(row);
+				});
+				renderCommitCount();
+			}
+
+			function renderCommitCount() {
+				commitCount.textContent = selectedCommitIds.length + (selectedCommitIds.length === 1 ? ' commit selected' : ' commits selected');
+			}
+
+			function selectedDraftOptions() {
+				return selectedDraftOptionIndexes.map(index => draftOptions[index]).filter(Boolean);
+			}
+
+			function renderOptionActions() {
+				const count = selectedDraftOptionIndexes.length;
+				optionSelectionCount.textContent = count === 0 ? 'No options selected' : count + (count === 1 ? ' option selected' : ' options selected');
+				separateDraftsButton.disabled = count === 0;
+				createCombinedDraftButton.disabled = count < 2;
+			}
+
+			function renderDraftOptions(options) {
+				draftOptions = options;
+				selectedDraftOptionIndexes = [];
+				draftOptionsElement.replaceChildren();
+				options.forEach((option, index) => {
+					const card = document.createElement('article');
+					card.className = 'draft-option';
+					const header = document.createElement('div');
+					header.className = 'draft-option-header';
+					const checkbox = document.createElement('input');
+					checkbox.className = 'option-checkbox';
+					checkbox.type = 'checkbox';
+					checkbox.setAttribute('aria-label', 'Select ' + option.label);
+					checkbox.addEventListener('change', () => {
+						selectedDraftOptionIndexes = checkbox.checked
+							? [...selectedDraftOptionIndexes, index]
+							: selectedDraftOptionIndexes.filter(selected => selected !== index);
+						renderOptionActions();
+					});
+					card.addEventListener('click', event => {
+						if (event.target === checkbox) return;
+						checkbox.checked = !checkbox.checked;
+						checkbox.dispatchEvent(new Event('change'));
+					});
+					const label = document.createElement('h2');
+					label.textContent = option.label;
+					const text = document.createElement('p');
+					text.textContent = option.draft;
+					header.append(checkbox, label);
+					card.append(header, text);
+					draftOptionsElement.appendChild(card);
+				});
+				renderOptionActions();
+			}
 
 			function renderImage() {
 				selectImageButton.textContent = imageName ? 'Replace image' : 'Add image';
@@ -774,9 +1070,9 @@ class CodeLoreWorkspacePanel {
 
 			function showView(view) {
 				document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view));
-				reviewButton.hidden = view === 'publish';
+				reviewButton.hidden = view !== 'create';
 				publishButton.hidden = view !== 'publish';
-				copyButton.hidden = view === 'publish' || mode !== 'draft';
+				copyButton.hidden = view !== 'create' || mode !== 'draft';
 				altTextGroup.hidden = view !== 'publish' || !imageUrl;
 				if (view === 'publish') {
 					renderPreview();
@@ -787,11 +1083,12 @@ class CodeLoreWorkspacePanel {
 				mode = nextMode;
 				const isDraft = mode === 'draft';
 				createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'Share what you learned today';
-				createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.';
+				createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Choose the commits, then add what you learned or decided. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.';
 				editor.value = isDraft ? draft : insight;
-				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'Today I learned...';
+				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'What did you learn or decide?';
 				insightActions.hidden = isDraft;
 				draftActions.hidden = !isDraft;
+				backToOptionsButton.hidden = !isDraft || draftOptions.length === 0;
 				copyButton.hidden = !isDraft;
 			}
 
@@ -819,12 +1116,28 @@ class CodeLoreWorkspacePanel {
 			document.getElementById('remove-image').addEventListener('click', () => {
 				vscode.postMessage({command: 'removeImage'});
 			});
+			chooseCommitsButton.addEventListener('click', () => {
+				renderCommitPicker();
+				commitPicker.hidden = false;
+			});
+			document.getElementById('cancel-commits').addEventListener('click', () => {
+				selectedCommitIds = [...savedCommitIds];
+				commitPicker.hidden = true;
+			});
+			document.getElementById('apply-commits').addEventListener('click', () => {
+				commitPicker.hidden = true;
+				vscode.postMessage({command: 'saveCommitSelection', commitIds: selectedCommitIds});
+			});
 			altTextInput.addEventListener('blur', () => {
 				vscode.postMessage({command: 'saveImageAltText', value: altTextInput.value});
 			});
-			document.getElementById('back-to-insight').addEventListener('click', () => {
+			document.getElementById('edit-input').addEventListener('click', () => {
 				draft = editor.value;
+				vscode.postMessage({command: 'saveDraft', value: draft});
 				showMode('insight');
+			});
+			backToOptionsButton.addEventListener('click', () => {
+				showView('options');
 			});
 			reviewButton.addEventListener('click', () => {
 				if (mode === 'draft') {
@@ -838,6 +1151,12 @@ class CodeLoreWorkspacePanel {
 			document.getElementById('back-to-draft').addEventListener('click', () => {
 				showView('create');
 				showMode('draft');
+			});
+			separateDraftsButton.addEventListener('click', () => {
+				vscode.postMessage({command: 'createDraftOptions', drafts: selectedDraftOptions().map(option => option.draft)});
+			});
+			createCombinedDraftButton.addEventListener('click', () => {
+				vscode.postMessage({command: 'combineDraftOptions', options: selectedDraftOptions()});
 			});
 			publishButton.addEventListener('click', () => {
 				if (publishButton.dataset.confirm !== 'true') {
@@ -860,6 +1179,10 @@ class CodeLoreWorkspacePanel {
 					imageUrl = message.imageUrl || '';
 					imageName = message.imageName || '';
 					altTextInput.value = message.imageAltText || '';
+					gitContext = message.gitContext;
+					commits = message.commits || [];
+					selectedCommitIds = message.selectedCommitIds || [];
+					savedCommitIds = [...selectedCommitIds];
 					if (isGenerating && draft) {
 						isGenerating = false;
 						showMode('draft');
@@ -870,6 +1193,7 @@ class CodeLoreWorkspacePanel {
 					publishButton.disabled = !message.linkedIn?.connected;
 					status.textContent = message.status || '';
 					renderImage();
+					renderGitContext();
 				}
 				if (message.type === 'status') {
 					status.textContent = message.status;
@@ -879,8 +1203,14 @@ class CodeLoreWorkspacePanel {
 					publishButton.classList.toggle('published', message.published);
 					publishButton.disabled = true;
 				}
+				if (message.type === 'draftOptions') {
+					isGenerating = false;
+					renderDraftOptions(message.options || []);
+					showView('options');
+				}
 				if (message.type === 'navigate') {
 					showView(message.view);
+					if (message.mode) showMode(message.mode);
 				}
 			});
 
@@ -895,7 +1225,10 @@ class CodeLoreWorkspacePanel {
 export function activate(context: vscode.ExtensionContext) {
 
 	const codeloreViewProvider = new CodeLoreViewProvider(context);
-	const codeloreWorkspacePanel = new CodeLoreWorkspacePanel(context);
+	const codeloreWorkspacePanel = new CodeLoreWorkspacePanel(
+		context,
+		() => codeloreViewProvider.refresh(),
+	);
 
 	context.subscriptions.push(
 	vscode.window.registerWebviewViewProvider(
@@ -1109,19 +1442,17 @@ export function activate(context: vscode.ExtensionContext) {
 
 			const platform = platformChoice.id === 'x' ? 'x': 'linkedin';
 
-			const latestCommitMessage =
+			const gitContext =
 			contextChoice.id === 'latestCommit'
-			? await getLatestCommitMessage()
+			? await collectWorkspaceGitContext()
 			: undefined;
 
 			const fallbackDraft = [
-				latestCommitMessage
-				? `Today I worked on ${latestCommitMessage}`
+				gitContext?.commitMessage
+				? `Shipped: ${gitContext.commitMessage}`
 				: 'Today I learned something while building:',
 				'',
 				reflection,
-				'',
-				'#buildinpublic #devjourney #CodeLore',
 			].join('\n');
 
 			let draft = fallbackDraft;
@@ -1132,7 +1463,7 @@ export function activate(context: vscode.ExtensionContext) {
 						location: vscode.ProgressLocation.Notification,
 						title: 'CodeLore is writing your draft...',
 					},
-					() => generateAiPostDraft(reflection, platform, latestCommitMessage),
+					() => generateAiPostDraft(reflection, platform, gitContext),
 				);
 
 				if (aiDraft) {
