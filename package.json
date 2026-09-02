@@ -2,12 +2,31 @@
   "name": "codelore",
   "displayName": "CodeLore",
   "description": "Turn today’s work into a story worth sharing.",
-  "version": "0.0.1",
+  "version": "0.1.0",
+  "publisher": "toonshi",
+  "icon": "resources/codelore.png",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/toonshi/codelore.git"
+  },
+  "bugs": {
+    "url": "https://github.com/toonshi/codelore/issues"
+  },
+  "homepage": "https://github.com/toonshi/codelore#readme",
+  "pricing": "Free",
   "engines": {
     "vscode": "^1.134.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Machine Learning"
+  ],
+  "keywords": [
+    "build in public",
+    "linkedin",
+    "developer writing",
+    "copilot"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",

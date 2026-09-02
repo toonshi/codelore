@@ -1,83 +1,70 @@
 # CodeLore
 
-CodeLore helps developers turn their daily work into a story worth sharing.
+Turn today’s work into a story worth sharing.
 
-It lives in VS Code and helps you reflect on what you built, what you learned, and what you got unstuck on. It can use your Git activity and your own notes to draft a post for LinkedIn or X. You stay in control of the final words and nothing gets posted without you pressing publish.
+CodeLore is a VS Code extension for developers who build in public. It turns selected Git work and optional context into a few grounded post ideas, then gives you a calm place to refine, preview, and publish one to LinkedIn.
 
-The goal is simple: building in public should feel like part of the work, not another task waiting at the end of the day.
+You own the final words. Nothing is published automatically.
 
-## What we are building
+## What it does
 
-- A quick daily reflection inside VS Code
-- Drafts based on commits, staged changes, or a developer's own notes
-- A safe context preview before any code is sent to an AI provider
-- A clean place to edit a LinkedIn or X post
-- Optional LinkedIn publishing after the user connects their account
+- Select the commits that belong to one story.
+- Add a short note when the interesting part is not obvious from Git.
+- Generate grounded story ideas such as a feature update, build log, problem solved, or lesson learned.
+- Combine ideas into one story or save separate drafts.
+- Edit, copy, preview, add an optional image, and publish to LinkedIn.
+- Keep a local history of drafts and published posts.
 
-## Setup
+## How it works
 
-You will need Node.js, npm, Git, and VS Code.
+1. Open **CodeLore** from the Activity Bar and create a new post.
+2. Choose the commits behind the work.
+3. Add context if it helps, then select **Generate story ideas**.
+4. Pick a direction, make it sound like you, then preview and publish.
+
+When no note is provided, CodeLore stays conservative and generates a factual feature update or build log. Add a real problem, decision, or lesson to unlock richer story directions.
+
+## Privacy and data
+
+- Git context stays local until you explicitly generate ideas.
+- For generation, CodeLore sends selected commit titles, changed file names, and high-level change summaries to the VS Code language model. It does not send raw source code or diffs.
+- Your optional note and the text you choose to publish are sent only when you use the relevant action.
+- LinkedIn publishing requires an explicit connection and final publish confirmation.
+- LinkedIn connection references are stored with VS Code Secret Storage. You can disconnect at any time.
+
+## Requirements
+
+- VS Code `1.134.0` or later
+- Git, for commit-based context
+- GitHub Copilot Chat or another VS Code language-model provider, for story generation
+- A LinkedIn account, only if you want to publish directly
+
+## Develop locally
 
 ```bash
-git clone git@github.com:toonshi/codelore.git
+git clone https://github.com/toonshi/codelore.git
 cd codelore
 npm install
 code .
 ```
 
-To run the extension locally, open the Run and Debug view in VS Code and press `F5`. VS Code opens a separate Extension Development Host window. In that window, open the Command Palette and run a CodeLore command.
+Press `F5` in VS Code to start an Extension Development Host. Use **Developer: Reload Window** there after making changes.
 
-If you make changes, use the development window's **Developer: Reload Window** command to recieve them.
-
-## Architecture
-
-CodeLore is designed to keep repository context local by default.
-
-```mermaid
-flowchart LR
-  D[Developer in VS Code] --> E[CodeLore extension]
-  E --> G[Git context]
-  E --> R[Daily reflection]
-  G --> S[Safety filter and context preview]
-  R --> S
-  S --> A[AI provider]
-  A --> P[Editable post draft]
-  P -->|Publish only when approved| B[CodeLore backend]
-  B --> L[LinkedIn]
-```
-
-The VS Code extension reads the workspace, gathers selected Git context, and creates drafts. The backend is only needed once we add LinkedIn publishing. It handles OAuth securely and stores the user’s publishing connection. It should never need a copy of the user’s repository.
-
-## Privacy principles
-
-- Code is not scanned or sent anywhere without a clear user action.
-- Sensitive files such as `.env` files and private keys are excluded by default.
-- The user can review the exact context before AI generation.
-- Posts are always reviewed before publishing.
-- Users can disconnect LinkedIn and delete their connection data.
-
-## Project structure
-
-```text
-src/
-  extension.ts       Extension entry point
-  test/              Extension tests
-.vscode/             Debug and task configuration
-package.json         VS Code extension manifest and npm scripts
-```
-
-## Development commands
+Useful commands:
 
 ```bash
 npm run compile
-npm run watch
-npm test
+npm run test:unit
 ```
 
 ## Status
 
-CodeLore is in early development. Right now, we are building the extension foundation before adding Git analysis, AI drafting, and LinkedIn publishing.
+CodeLore is an early release. LinkedIn is supported today. X support is planned next.
 
 ## Contributing
 
-This project is being built in public. Issues, ideas, and honest feedback are welcome.
+Issues, ideas, and honest feedback are welcome. See the [roadmap](https://github.com/toonshi/codelore/projects) for what is coming next.
+
+## License
+
+[MIT](LICENSE)
