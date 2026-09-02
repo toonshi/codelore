@@ -1,9 +1,10 @@
 # Change Log
 
-All notable changes to the "codelore" extension will be documented in this file.
+All notable changes to the CodeLore extension are documented here.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+## [0.1.0] - 2026-09-02
 
-## [Unreleased]
-
-- Initial release
+- Turn selected Git work into grounded story ideas.
+- Add optional context, choose a direction, and edit a post before publishing.
+- Connect LinkedIn, preview a post, and publish only after explicit confirmation.
+- Attach an optional image to a LinkedIn post.
