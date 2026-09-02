@@ -2,6 +2,7 @@
 import * as vscode from 'vscode';
 import {execFile} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
+import * as path from 'node:path';
 import {promisify} from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -20,6 +21,8 @@ type CodeLorePost = {
 	createdAt: number;
 	updatedAt: number;
 	publishedAt?: number;
+	imagePath?: string;
+	imageName?: string;
 };
 
 const postsKey = 'codelore.posts';
@@ -289,7 +292,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	.actions button { margin: 0; text-align: left; }
 	.new-post { margin: 18px 0 0; text-align: left; }
 	.history-empty { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; padding: 10px 4px; }
-	.history-row { align-items: center; border-radius: 4px; display: flex; gap: 6px; padding: 7px 4px; } .history-row:hover { background: var(--vscode-list-hoverBackground); } .history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .history-action { background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; margin: 0; padding: 2px; width: auto; }
+	.history-row { align-items: center; border-radius: 4px; display: flex; gap: 6px; padding: 7px 4px; } .history-row:hover { background: var(--vscode-list-hoverBackground); } .history-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .history-action { background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; margin: 0; padding: 2px; width: auto; } .history-action svg { display: block; height: 14px; width: 14px; }
 	.filters { display: flex; gap: 6px; margin-bottom: 6px; } .filter { background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; margin: 0; padding: 3px 4px; width: auto; } .filter.active { color: var(--vscode-foreground); } .post-state { color: var(--vscode-descriptionForeground); font-size: 11px; }
 	.accounts { margin-top: auto; padding-top: 24px; }
 	.privacy { color: var(--vscode-descriptionForeground); font-size: 12px; line-height: 1.45; margin-top: 24px; }
@@ -347,7 +350,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 	window.addEventListener('message', (event) => {
 		const message = event.data;
-		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } const ago = time => { const minutes = Math.max(1, Math.floor((Date.now() - time) / 60000)); return minutes < 60 ? minutes + 'm ago' : minutes < 1440 ? Math.floor(minutes / 60) + 'h ago' : Math.floor(minutes / 1440) + 'd ago'; }; posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published ' + ago(post.publishedAt) : 'Draft ' + ago(post.updatedAt); const edit = document.createElement('button'); edit.className = 'history-action'; edit.ariaLabel = 'Edit post'; edit.textContent = '✎'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.ariaLabel = 'Delete post'; remove.textContent = '⌫'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
+		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } const ago = time => { const minutes = Math.max(1, Math.floor((Date.now() - time) / 60000)); return minutes < 60 ? minutes + 'm ago' : minutes < 1440 ? Math.floor(minutes / 60) + 'h ago' : Math.floor(minutes / 1440) + 'd ago'; }; posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published ' + ago(post.publishedAt) : 'Draft ' + ago(post.updatedAt); const edit = document.createElement('button'); edit.className = 'history-action'; edit.ariaLabel = 'Edit post'; edit.textContent = '✎'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.ariaLabel = 'Delete post'; remove.title = 'Delete post'; remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6 1h4l1 2h3v1H2V3h3l1-2zm-1 4h6l-.5 9h-5L5 5zm2 2v5h1V7H7zm2 0v5h1V7H9z"/></svg>'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
 		if (message.type !== 'linkedinStatus') return;
 
 		if (!message.connected) {
@@ -478,6 +481,37 @@ class CodeLoreWorkspacePanel {
 				return;
 			}
 
+			if (message.command === 'selectImage') {
+				const selection = await vscode.window.showOpenDialog({
+					canSelectFiles: true,
+					canSelectFolders: false,
+					canSelectMany: false,
+					filters: {Images: ['jpg', 'jpeg', 'png']},
+					openLabel: 'Attach image',
+				});
+				const imageUri = selection?.[0];
+				if (!imageUri) return;
+
+				const file = await vscode.workspace.fs.stat(imageUri);
+				if (file.size > 10 * 1024 * 1024) {
+					await this.postStatus('Choose an image smaller than 10 MB.');
+					return;
+				}
+
+				await updateActivePost(this.context, {
+					imagePath: imageUri.fsPath,
+					imageName: path.basename(imageUri.fsPath),
+				});
+				await this.refresh('Image attached. It stays local until you publish.');
+				return;
+			}
+
+			if (message.command === 'removeImage') {
+				await updateActivePost(this.context, {imagePath: undefined, imageName: undefined});
+				await this.refresh('Image removed.');
+				return;
+			}
+
 			if (message.command === 'publishPost') {
 				const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
 				if (!connectionId || !message.value?.trim()) {
@@ -508,6 +542,7 @@ class CodeLoreWorkspacePanel {
 		}
 
 		const post = await getActivePost(this.context);
+		const imageUrl = this.getImagePreviewUrl(post.imagePath);
 		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
 		let linkedIn: LinkedInStatus = {connected: false};
 		try {
@@ -519,9 +554,21 @@ class CodeLoreWorkspacePanel {
 			type: 'state',
 			reflection: post.insight,
 			draft: post.draft,
+			imageUrl,
+			imageName: post.imageName,
 			linkedIn,
 			status,
 		});
+	}
+
+	private getImagePreviewUrl(imagePath?: string): string | undefined {
+		if (!this.panel || !imagePath) return undefined;
+
+		this.panel.webview.options = {
+			...this.panel.webview.options,
+			localResourceRoots: [vscode.Uri.file(path.dirname(imagePath))],
+		};
+		return this.panel.webview.asWebviewUri(vscode.Uri.file(imagePath)).toString();
 	}
 
 	private async postStatus(status: string): Promise<void> {
@@ -537,7 +584,7 @@ class CodeLoreWorkspacePanel {
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource}; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';">
 	<style>${this.workspaceStyles()}</style>
 </head>
 <body>
@@ -551,7 +598,7 @@ class CodeLoreWorkspacePanel {
 		return `
 			body { background: var(--vscode-editor-background); color: var(--vscode-editor-foreground); font-family: var(--vscode-font-family); margin: 0; }
 			.app { min-height: 100vh; }
-			main { box-sizing: border-box; display: flex; flex-direction: column; margin: 0 auto; max-width: 860px; min-height: 100vh; padding: 48px; width: 100%; }
+			main { box-sizing: border-box; display: flex; flex-direction: column; margin: 0 auto; max-width: 860px; min-height: 100vh; padding: 28px 32px 24px; width: 100%; }
 			.view { display: none; flex: 1; }
 			.view.active { display: block; }
 			h1 { font-size: 26px; font-weight: 600; margin: 0 0 8px; }
@@ -562,12 +609,24 @@ class CodeLoreWorkspacePanel {
 			.primary:hover { background: var(--vscode-button-hoverBackground); }
 			.published { background: var(--vscode-testing-iconPassed) !important; color: var(--vscode-editor-background) !important; }
 			.secondary { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin: 16px 8px 0 0; padding: 9px 14px; }
-			#draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
+			#editor-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+			#insight-actions, #draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
 			#draft-actions[hidden] { display: none; }
-			.footer-actions { display: flex; justify-content: flex-end; margin-top: auto; padding-top: 24px; }
+			#media-actions { align-items: center; display: flex; flex-wrap: wrap; margin-left: auto; }
+			#media-actions .secondary { margin-right: 0; }
+			#image-details { align-items: center; color: var(--vscode-descriptionForeground); display: inline-flex; font-size: 12px; gap: 6px; margin-left: 4px; }
+			#image-details[hidden] { display: none; }
+			.icon-button { background: transparent; border: 0; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 2px; }
+			.icon-button:hover { color: var(--vscode-editor-foreground); }
+			.icon-button svg { display: block; height: 14px; width: 14px; }
+			.footer-actions { align-items: center; display: flex; justify-content: flex-end; margin-top: auto; padding-top: 24px; }
 			.footer-actions .primary { margin-top: 0; }
+			.footer-actions .secondary { margin: 0; }
+			.copy-button { align-items: center; display: inline-flex; gap: 6px; margin-right: auto !important; }
+			.copy-button svg { height: 14px; width: 14px; }
 			.footer { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 16px; min-height: 18px; }
-			.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 24px; white-space: pre-wrap; }
+			.empty { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 8px; color: var(--vscode-descriptionForeground); padding: 14px; white-space: pre-wrap; }
+			#review-image { border-radius: 6px; display: block; margin-top: 20px; max-height: 500px; max-width: 100%; object-fit: contain; }
 			@media (max-width: 560px) { main { padding: 28px 20px; } }
 		`;
 	}
@@ -580,26 +639,38 @@ class CodeLoreWorkspacePanel {
 						<h1 id="create-title">Share what you learned today</h1>
 						<p id="create-copy">Write the insight first. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p>
 						<textarea id="editor" placeholder="Today I learned..."></textarea>
-						<div id="insight-actions">
-							<button class="primary" id="generate-draft">Generate LinkedIn draft</button>
-							<button class="secondary" id="save-reflection">Save insight</button>
-						</div>
-						<div id="draft-actions" hidden>
-							<button class="secondary" id="back-to-insight">Back to insight</button>
-							<button class="secondary" id="regenerate-draft">Regenerate</button>
-							<button class="secondary" id="save-draft">Save changes</button>
-							<button class="secondary" id="copy-draft">Copy draft</button>
+						<div id="editor-actions">
+							<div id="insight-actions">
+								<button class="primary" id="generate-draft">Generate LinkedIn draft</button>
+								<button class="secondary" id="save-reflection">Save insight</button>
+							</div>
+							<div id="draft-actions" hidden>
+								<button class="secondary" id="back-to-insight">Back to insight</button>
+								<button class="secondary" id="regenerate-draft">Regenerate</button>
+								<button class="secondary" id="save-draft">Save changes</button>
+							</div>
+							<div id="media-actions">
+								<button class="secondary" id="select-image">Add image</button>
+								<span id="image-details" hidden>
+									<span id="image-name"></span>
+									<button class="icon-button" id="remove-image" aria-label="Remove image" title="Remove image"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6 1h4l1 2h3v1H2V3h3l1-2zm-1 4h6l-.5 9h-5L5 5zm2 2v5h1V7H7zm2 0v5h1V7H9z"/></svg></button>
+								</span>
+							</div>
 						</div>
 					</section>
 					<section class="view" id="publish">
 						<h1>Preview & publish</h1>
 						<p>This is the exact text CodeLore will send. Nothing posts automatically.</p>
-						<div class="empty" id="review-content"></div>
+						<div class="empty" id="review-content">
+							<div id="review-text"></div>
+							<img id="review-image" alt="Attached image" hidden>
+						</div>
 						<p class="footer" id="review-account">Checking LinkedIn connection...</p>
 						<button class="secondary" id="back-to-draft">Back to edit</button>
 					</section>
 					<div class="footer" id="status"></div>
 					<div class="footer-actions" id="footer-actions">
+						<button class="secondary copy-button" id="copy-draft" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M3 1h8v2H5v8H3V1zm3 4h7v10H6V5zm1 1v8h5V6H7z"/></svg><span>Copy draft</span></button>
 						<button class="primary" id="review-publish">Preview & publish</button>
 						<button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button>
 					</div>
@@ -617,23 +688,42 @@ class CodeLoreWorkspacePanel {
 			const createCopy = document.getElementById('create-copy');
 			const insightActions = document.getElementById('insight-actions');
 			const draftActions = document.getElementById('draft-actions');
-			const reviewContent = document.getElementById('review-content');
+			const reviewTextElement = document.getElementById('review-text');
+			const reviewImage = document.getElementById('review-image');
 			const reviewAccount = document.getElementById('review-account');
 			const reviewButton = document.getElementById('review-publish');
 			const publishButton = document.getElementById('publish-linkedin');
+			const copyButton = document.getElementById('copy-draft');
+			const imageDetails = document.getElementById('image-details');
+			const imageNameElement = document.getElementById('image-name');
 
 			let insight = '';
 			let draft = '';
 			let reviewText = '';
+			let imageUrl = '';
+			let imageName = '';
 			let mode = 'insight';
 			let isGenerating = false;
+
+			function renderImage() {
+				imageDetails.hidden = !imageName;
+				imageNameElement.textContent = imageName;
+				reviewImage.hidden = !imageUrl;
+				reviewImage.src = imageUrl;
+			}
+
+			function renderPreview() {
+				reviewTextElement.textContent = reviewText || draft || insight || 'Write something before you publish.';
+				renderImage();
+			}
 
 			function showView(view) {
 				document.querySelectorAll('.view').forEach(item => item.classList.toggle('active', item.id === view));
 				reviewButton.hidden = view === 'publish';
 				publishButton.hidden = view !== 'publish';
+				copyButton.hidden = view === 'publish' || mode !== 'draft';
 				if (view === 'publish') {
-					reviewContent.textContent = reviewText || draft || insight || 'Write something before you publish.';
+					renderPreview();
 				}
 			}
 
@@ -646,6 +736,7 @@ class CodeLoreWorkspacePanel {
 				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'Today I learned...';
 				insightActions.hidden = isDraft;
 				draftActions.hidden = !isDraft;
+				copyButton.hidden = !isDraft;
 			}
 
 			document.getElementById('save-reflection').addEventListener('click', () => {
@@ -665,6 +756,12 @@ class CodeLoreWorkspacePanel {
 			});
 			document.getElementById('copy-draft').addEventListener('click', () => {
 				vscode.postMessage({command: 'copyDraft'});
+			});
+			document.getElementById('select-image').addEventListener('click', () => {
+				vscode.postMessage({command: 'selectImage'});
+			});
+			document.getElementById('remove-image').addEventListener('click', () => {
+				vscode.postMessage({command: 'removeImage'});
 			});
 			document.getElementById('back-to-insight').addEventListener('click', () => {
 				draft = editor.value;
@@ -701,6 +798,8 @@ class CodeLoreWorkspacePanel {
 				if (message.type === 'state') {
 					insight = message.reflection || '';
 					draft = message.draft || '';
+					imageUrl = message.imageUrl || '';
+					imageName = message.imageName || '';
 					if (isGenerating && draft) {
 						isGenerating = false;
 						showMode('draft');
@@ -710,6 +809,7 @@ class CodeLoreWorkspacePanel {
 					reviewAccount.textContent = message.linkedIn?.connected ? message.linkedIn.displayName || 'LinkedIn connected' : 'Connect LinkedIn before publishing.';
 					publishButton.disabled = !message.linkedIn?.connected;
 					status.textContent = message.status || '';
+					renderImage();
 				}
 				if (message.type === 'status') {
 					status.textContent = message.status;
