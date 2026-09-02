@@ -25,22 +25,32 @@ suite('Post prompt builder', () => {
 		assert.match(prompt, /Every claim must be supported/);
 	});
 
-	test('asks for several grounded angles without Git workflow language', () => {
+	test('keeps Git-only story ideas factual and out of Git workflow language', () => {
 		const prompt = buildDraftOptionsPrompt({platform: 'linkedin'});
 
-		assert.match(prompt, /two or three distinct post options/);
+		assert.match(prompt, /Create exactly two distinct post options: one feature and one build-log/);
+		assert.match(prompt, /Allowed angles are: feature, build-log/);
 		assert.match(prompt, /Never say "merged PR"/);
 		assert.match(prompt, /Return only a JSON array/);
-		assert.match(prompt, /Each option must use a different supported angle/);
 		assert.match(prompt, /Feature means a concrete capability or improvement/);
 		assert.match(prompt, /Use these labels: "Feature", "Problem solved", "Lesson learned", or "Build log"/);
+	});
+
+	test('unlocks problem and lesson angles when the author adds context', () => {
+		const prompt = buildDraftOptionsPrompt({
+			platform: 'linkedin',
+			manualInsight: 'I fixed the layout bug after learning why the flex container kept shrinking.',
+		});
+
+		assert.match(prompt, /Create two or three distinct post options/);
+		assert.match(prompt, /Allowed angles are: feature, bug, lesson, build-log/);
 	});
 
 	test('parses valid draft options and ignores unsupported angles', () => {
 		const options = parseDraftOptions('```json\n[{"angle":"feature","label":"New feature","draft":"Built image previews."},{"angle":"bug","label":"Problem solved","draft":"Fixed the picker."},{"angle":"news","label":"News","draft":"Nope."}]\n```');
 
 		assert.deepStrictEqual(options, [
-			{angle: 'feature', label: 'New feature', draft: 'Built image previews.'},
+			{angle: 'feature', label: 'Feature', draft: 'Built image previews.'},
 			{angle: 'bug', label: 'Problem solved', draft: 'Fixed the picker.'},
 		]);
 	});
