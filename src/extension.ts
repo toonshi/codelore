@@ -350,7 +350,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 	window.addEventListener('message', (event) => {
 		const message = event.data;
-		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } const ago = time => { const minutes = Math.max(1, Math.floor((Date.now() - time) / 60000)); return minutes < 60 ? minutes + 'm ago' : minutes < 1440 ? Math.floor(minutes / 60) + 'h ago' : Math.floor(minutes / 1440) + 'd ago'; }; posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published ' + ago(post.publishedAt) : 'Draft ' + ago(post.updatedAt); const edit = document.createElement('button'); edit.className = 'history-action'; edit.ariaLabel = 'Edit post'; edit.textContent = '✎'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.ariaLabel = 'Delete post'; remove.title = 'Delete post'; remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6 1h4l1 2h3v1H2V3h3l1-2zm-1 4h6l-.5 9h-5L5 5zm2 2v5h1V7H7zm2 0v5h1V7H9z"/></svg>'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
+		if (message.type === 'posts') { savedPosts = message.posts; history.replaceChildren(); const posts = savedPosts.filter(post => postFilter === 'all' || post.state === postFilter); if (!posts.length) { history.textContent = 'No posts here yet.'; return; } const ago = time => { const minutes = Math.max(1, Math.floor((Date.now() - time) / 60000)); return minutes < 60 ? minutes + 'm ago' : minutes < 1440 ? Math.floor(minutes / 60) + 'h ago' : Math.floor(minutes / 1440) + 'd ago'; }; posts.forEach(post => { const row = document.createElement('div'); row.className = 'history-row'; const title = document.createElement('span'); title.className = 'history-title'; title.textContent = post.title; const state = document.createElement('span'); state.className = 'post-state'; state.textContent = post.state === 'published' ? 'Published ' + ago(post.publishedAt) : 'Draft ' + ago(post.updatedAt); const edit = document.createElement('button'); edit.className = 'history-action'; edit.ariaLabel = 'Edit post'; edit.title = 'Edit post'; edit.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M14.236 1.76386C13.2123 0.740172 11.5525 0.740171 10.5289 1.76386L2.65722 9.63549C2.28304 10.0097 2.01623 10.4775 1.88467 10.99L1.01571 14.3755C0.971767 14.5467 1.02148 14.7284 1.14646 14.8534C1.27144 14.9783 1.45312 15.028 1.62432 14.9841L5.00978 14.1151C5.52234 13.9836 5.99015 13.7168 6.36433 13.3426L14.236 5.47097C15.2596 4.44728 15.2596 2.78755 14.236 1.76386ZM11.236 2.47097C11.8691 1.8378 12.8957 1.8378 13.5288 2.47097C14.162 3.10413 14.162 4.1307 13.5288 4.76386L12.75 5.54269L10.4571 3.24979L11.236 2.47097ZM9.75002 3.9569L12.0429 6.24979L5.65722 12.6355C5.40969 12.883 5.10023 13.0595 4.76117 13.1465L2.19447 13.8053L2.85327 11.2386C2.9403 10.8996 3.1168 10.5901 3.36433 10.3426L9.75002 3.9569Z"/></svg>'; edit.addEventListener('click', () => vscode.postMessage({command: 'editPost', postId: post.id})); const remove = document.createElement('button'); remove.className = 'history-action'; remove.ariaLabel = 'Delete post'; remove.title = 'Delete post'; remove.innerHTML = '<svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M10 3h3v1h-1v9l-1 1H4l-1-1V4H2V3h3V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zM9 2H6v1h3V2zM4 13h7V4H4v9zm2-8H5v7h1V5zm1 0h1v7H7V5zm2 0h1v7H9V5z"/></svg>'; remove.addEventListener('click', () => vscode.postMessage({command: 'deletePost', postId: post.id})); row.append(title, state, edit, remove); history.appendChild(row); }); return; }
 		if (message.type !== 'linkedinStatus') return;
 
 		if (!message.connected) {
@@ -610,11 +610,11 @@ class CodeLoreWorkspacePanel {
 			.secondary { background: var(--vscode-button-secondaryBackground); border: 0; border-radius: 5px; color: var(--vscode-button-secondaryForeground); cursor: pointer; font: inherit; margin: 16px 8px 0 0; padding: 9px 14px; }
 			#editor-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
 			#insight-actions, #draft-actions { align-items: center; display: flex; flex-wrap: wrap; }
+			#insight-actions[hidden], #draft-actions[hidden] { display: none; }
 			#draft-actions[hidden] { display: none; }
 			#media-actions { align-items: center; display: flex; flex-wrap: wrap; margin-left: auto; }
 			#media-actions .secondary { margin-right: 0; }
-			#image-details { align-items: center; color: var(--vscode-descriptionForeground); display: inline-flex; font-size: 12px; gap: 6px; margin-left: 4px; }
-			#image-details[hidden] { display: none; }
+			#remove-image { margin: 16px 0 0 6px; }
 			.icon-button { background: transparent; border: 0; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 2px; }
 			.icon-button:hover { color: var(--vscode-editor-foreground); }
 			.icon-button svg { display: block; height: 14px; width: 14px; }
@@ -650,10 +650,7 @@ class CodeLoreWorkspacePanel {
 							</div>
 							<div id="media-actions">
 								<button class="secondary" id="select-image">Add image</button>
-								<span id="image-details" hidden>
-									<span id="image-name"></span>
-									<button class="icon-button" id="remove-image" aria-label="Remove image" title="Remove image"><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M6 1h4l1 2h3v1H2V3h3l1-2zm-1 4h6l-.5 9h-5L5 5zm2 2v5h1V7H7zm2 0v5h1V7H9z"/></svg></button>
-								</span>
+								<button class="icon-button" id="remove-image" aria-label="Remove image" title="Remove image" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" clip-rule="evenodd" d="M10 3h3v1h-1v9l-1 1H4l-1-1V4H2V3h3V2a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1zM9 2H6v1h3V2zM4 13h7V4H4v9zm2-8H5v7h1V5zm1 0h1v7H7V5zm2 0h1v7H9V5z"/></svg></button>
 							</div>
 						</div>
 					</section>
@@ -693,8 +690,8 @@ class CodeLoreWorkspacePanel {
 			const reviewButton = document.getElementById('review-publish');
 			const publishButton = document.getElementById('publish-linkedin');
 			const copyButton = document.getElementById('copy-draft');
-			const imageDetails = document.getElementById('image-details');
-			const imageNameElement = document.getElementById('image-name');
+			const selectImageButton = document.getElementById('select-image');
+			const removeImageButton = document.getElementById('remove-image');
 
 			let insight = '';
 			let draft = '';
@@ -705,8 +702,8 @@ class CodeLoreWorkspacePanel {
 			let isGenerating = false;
 
 			function renderImage() {
-				imageDetails.hidden = !imageName;
-				imageNameElement.textContent = imageName;
+				selectImageButton.textContent = imageName ? 'Replace image' : 'Add image';
+				removeImageButton.hidden = !imageName;
 				reviewImage.hidden = !imageUrl;
 				reviewImage.src = imageUrl;
 			}
