@@ -67,6 +67,23 @@ export function parseDraftOptions(response: string): PostDraftOption[] {
 	}
 }
 
+export function buildCombinedDraftPrompt(
+	options: PostDraftOption[],
+	context: DraftPromptOptions,
+): string {
+	return [
+		buildDraftPrompt(context),
+		'',
+		'Write one fresh build-in-public story from the selected directions below. Do not stitch together or quote the draft options.',
+		'Find one natural thread that connects them. Do not turn this into a changelog or a list.',
+		'Never mention pull requests, commits, file counts, or the existence of these options.',
+		'Return only the post text.',
+		'',
+		'Selected directions:',
+		...options.map((option) => `- ${option.label} (${option.angle})`),
+	].join('\n');
+}
+
 function isPostDraftOption(value: unknown): value is PostDraftOption {
 	if (!value || typeof value !== 'object') return false;
 	const option = value as Record<string, unknown>;

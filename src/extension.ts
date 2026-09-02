@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {collectCommitContext, collectLatestCommitContext, listRecentCommits, type GitCommitContext} from './git-context';
-import {buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions, type PostDraftOption} from './post-prompt';
+import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions, type PostDraftOption} from './post-prompt';
 
 const execFileAsync = promisify(execFile);
 const apiBaseUrl = 'https://codelore-api.codelore.workers.dev';
@@ -92,6 +92,30 @@ async function updateActivePost(context: vscode.ExtensionContext, changes: Parti
 	await context.workspaceState.update('codelore.latestReflection', updated.insight);
 	await context.workspaceState.update('codelore.latestDraft', updated.draft);
 	return updated;
+}
+
+async function createDraftPostsFromOptions(
+	context: vscode.ExtensionContext,
+	drafts: string[],
+): Promise<CodeLorePost[]> {
+	const active = await getActivePost(context);
+	const posts = await getPosts(context);
+	const now = Date.now();
+	const created = drafts.map((draft, index) => ({
+		...active,
+		id: index === 0 ? active.id : randomUUID(),
+		draft,
+		createdAt: index === 0 ? active.createdAt : now,
+		updatedAt: now,
+		publishedAt: undefined,
+		imagePath: undefined,
+		imageName: undefined,
+		imageAltText: undefined,
+	}));
+	await context.workspaceState.update(postsKey, [...created, ...posts.filter((post) => post.id !== active.id)]);
+	await context.workspaceState.update(activePostKey, created[0].id);
+	await context.workspaceState.update('codelore.latestDraft', created[0].draft);
+	return created;
 }
 
 async function getLinkedInStatus(connectionId: string): Promise<LinkedInStatus> {
@@ -213,6 +237,30 @@ async function generateAiPostOptions(
 		let text = '';
 		for await (const fragment of response.text) text += fragment;
 		return parseDraftOptions(text);
+	} finally {
+		cancellation.dispose();
+	}
+}
+
+async function generateAiCombinedDraft(
+	options: PostDraftOption[],
+	manualInsight: string | undefined,
+	platform: 'linkedin' | 'x',
+	gitContext?: GitCommitContext,
+): Promise<string | undefined> {
+	const [model] = await vscode.lm.selectChatModels({vendor: 'copilot'});
+	if (!model) return undefined;
+
+	const cancellation = new vscode.CancellationTokenSource();
+	try {
+		const response = await model.sendRequest(
+			[vscode.LanguageModelChatMessage.User(buildCombinedDraftPrompt(options, {manualInsight, platform, gitContext}))],
+			{},
+			cancellation.token,
+		);
+		let text = '';
+		for await (const fragment of response.text) text += fragment;
+		return text.trim() || undefined;
 	} finally {
 		cancellation.dispose();
 	}
@@ -427,7 +475,10 @@ class CodeLoreWorkspacePanel {
 	private panel: vscode.WebviewPanel | undefined;
 	private activeView: 'create' | 'publish' = 'create';
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	constructor(
+		private readonly context: vscode.ExtensionContext,
+		private readonly refreshSidebar: () => Promise<void>,
+	) {}
 
 	open(view: 'create' | 'publish' = 'create'): void {
 		this.activeView = view;
@@ -448,7 +499,7 @@ class CodeLoreWorkspacePanel {
 		this.panel.onDidDispose(() => {
 			this.panel = undefined;
 		});
-		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string; altText?: string; commitIds?: string[]}) => {
+		this.panel.webview.onDidReceiveMessage(async (message: {command: string; value?: string; source?: string; altText?: string; commitIds?: string[]; drafts?: string[]; options?: PostDraftOption[]}) => {
 			if (message.command === 'ready') {
 				await this.refresh();
 				await this.panel?.webview.postMessage({type: 'navigate', view: this.activeView});
@@ -476,7 +527,7 @@ class CodeLoreWorkspacePanel {
 					await this.postStatus('Write an insight or make a Git commit first.');
 					return;
 				}
-				await updateActivePost(this.context, {insight: reflection});
+				await updateActivePost(this.context, {insight: writtenInsight ?? ''});
 
 				await this.postStatus(writtenInsight ? 'Writing your LinkedIn draft...' : 'Using your latest commit to write a LinkedIn draft...');
 				const fallbackDraft = [
@@ -508,7 +559,32 @@ class CodeLoreWorkspacePanel {
 			if (message.command === 'chooseDraftOption') {
 				await updateActivePost(this.context, {draft: message.value?.trim() ?? ''});
 				await this.refresh('Draft ready for your review.');
-				await this.panel?.webview.postMessage({type: 'navigate', view: 'create'});
+				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
+				return;
+			}
+
+			if (message.command === 'createDraftOptions') {
+				const drafts = message.drafts?.map((draft) => draft.trim()).filter(Boolean) ?? [];
+				if (!drafts.length) return;
+				await createDraftPostsFromOptions(this.context, drafts);
+				await this.refresh(drafts.length === 1 ? 'Draft ready for your review.' : `${drafts.length} drafts created.`);
+				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
+				return;
+			}
+
+			if (message.command === 'combineDraftOptions') {
+				const options = message.options?.filter((option) => option?.draft?.trim() && option?.label?.trim()) ?? [];
+				if (options.length < 2) {
+					await this.postStatus('Choose at least two directions to create one story.');
+					return;
+				}
+				const post = await getActivePost(this.context);
+				const gitContext = await collectWorkspaceGitContext(post.commitIds);
+				await this.postStatus('Writing one story from your selected directions...');
+				const draft = await generateAiCombinedDraft(options, message.value?.trim() || post.insight, 'linkedin', gitContext) ?? options[0].draft;
+				await updateActivePost(this.context, {draft});
+				await this.refresh('Combined draft ready for your review.');
+				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
 				return;
 			}
 
@@ -638,6 +714,7 @@ class CodeLoreWorkspacePanel {
 			linkedIn,
 			status,
 		});
+		await this.refreshSidebar();
 	}
 
 	private async publishImagePost(
@@ -747,10 +824,17 @@ class CodeLoreWorkspacePanel {
 			#commit-count { color: var(--vscode-descriptionForeground); flex: 1; font-size: 12px; }
 			.picker-footer .secondary, .picker-footer .primary { margin-top: 0; }
 			#draft-options { display: grid; gap: 12px; }
-			.draft-option { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 7px; padding: 14px; }
-			.draft-option h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; }
+			.draft-option { border: 1px dashed var(--vscode-editorWidget-border); border-radius: 7px; cursor: pointer; padding: 14px; }
+			.draft-option:hover { border-color: var(--vscode-focusBorder); }
+			.draft-option-header { align-items: center; display: flex; gap: 9px; margin-bottom: 8px; }
+			.draft-option-header h2 { flex: 1; font-size: 13px; font-weight: 600; margin: 0; }
+			.option-checkbox { appearance: none; background: var(--vscode-checkbox-background); border: 1px solid var(--vscode-checkbox-border); border-radius: 2px; height: 13px; position: relative; width: 13px; }
+			.option-checkbox:checked { background: var(--vscode-button-background); border-color: var(--vscode-button-background); }
+			.option-checkbox:checked::after { border: solid var(--vscode-button-foreground); border-width: 0 2px 2px 0; content: ''; height: 6px; left: 3px; position: absolute; top: 1px; transform: rotate(45deg); width: 3px; }
 			.draft-option p { color: var(--vscode-editor-foreground); font-size: 13px; margin: 0 0 12px; white-space: pre-wrap; }
-			.draft-option .secondary { margin: 0; }
+			.option-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+			.option-actions .secondary, .option-actions .primary { margin: 0; }
+			.option-actions span { color: var(--vscode-descriptionForeground); flex: 1; font-size: 12px; }
 			.icon-button { background: transparent; border: 0; color: var(--vscode-descriptionForeground); cursor: pointer; padding: 2px; }
 			.icon-button:hover { color: var(--vscode-editor-foreground); }
 			.icon-button svg { display: block; height: 14px; width: 14px; }
@@ -787,8 +871,9 @@ class CodeLoreWorkspacePanel {
 								<button class="primary" id="generate-draft">Generate LinkedIn draft</button>
 								<button class="secondary" id="save-reflection">Save insight</button>
 							</div>
-							<div id="draft-actions" hidden>
-								<button class="secondary" id="back-to-insight">Back to insight</button>
+						<div id="draft-actions" hidden>
+							<button class="secondary" id="back-to-options" hidden>Back to options</button>
+							<button class="secondary" id="edit-input">Edit input</button>
 								<button class="secondary" id="regenerate-draft">Regenerate</button>
 								<button class="secondary" id="save-draft">Save changes</button>
 							</div>
@@ -813,10 +898,10 @@ class CodeLoreWorkspacePanel {
 						<button class="secondary" id="back-to-draft">Back to edit</button>
 					</section>
 					<section class="view" id="options">
-						<h1>Pick a direction</h1>
-						<p>Each option comes from the work you selected. Pick the one that feels most worth sharing.</p>
+						<h1>Pick what to share</h1>
+						<p>Choose one or more directions from the work you selected.</p>
 						<div id="draft-options"></div>
-						<button class="secondary" id="back-to-compose">Back to your note</button>
+						<div class="option-actions"><span id="option-selection-count">No options selected</span><button class="secondary" id="create-separate-drafts" disabled>Create separate drafts</button><button class="primary" id="create-combined-draft" disabled>Create one story</button></div>
 					</section>
 					<div class="footer" id="status"></div>
 						<div class="footer-actions" id="footer-actions">
@@ -845,6 +930,7 @@ class CodeLoreWorkspacePanel {
 			const createCopy = document.getElementById('create-copy');
 			const insightActions = document.getElementById('insight-actions');
 			const draftActions = document.getElementById('draft-actions');
+			const backToOptionsButton = document.getElementById('back-to-options');
 			const reviewTextElement = document.getElementById('review-text');
 			const reviewImage = document.getElementById('review-image');
 			const altTextGroup = document.getElementById('alt-text-group');
@@ -862,6 +948,9 @@ class CodeLoreWorkspacePanel {
 			const commitList = document.getElementById('commit-list');
 			const commitCount = document.getElementById('commit-count');
 			const draftOptionsElement = document.getElementById('draft-options');
+			const optionSelectionCount = document.getElementById('option-selection-count');
+			const separateDraftsButton = document.getElementById('create-separate-drafts');
+			const createCombinedDraftButton = document.getElementById('create-combined-draft');
 
 			let insight = '';
 			let draft = '';
@@ -874,6 +963,8 @@ class CodeLoreWorkspacePanel {
 			let commits = [];
 			let selectedCommitIds = [];
 			let savedCommitIds = [];
+			let draftOptions = [];
+			let selectedDraftOptionIndexes = [];
 
 			function renderGitContext() {
 				const hasCommits = commits.length > 0;
@@ -919,27 +1010,50 @@ class CodeLoreWorkspacePanel {
 				commitCount.textContent = selectedCommitIds.length + (selectedCommitIds.length === 1 ? ' commit selected' : ' commits selected');
 			}
 
+			function selectedDraftOptions() {
+				return selectedDraftOptionIndexes.map(index => draftOptions[index]).filter(Boolean);
+			}
+
+			function renderOptionActions() {
+				const count = selectedDraftOptionIndexes.length;
+				optionSelectionCount.textContent = count === 0 ? 'No options selected' : count + (count === 1 ? ' option selected' : ' options selected');
+				separateDraftsButton.disabled = count === 0;
+				createCombinedDraftButton.disabled = count < 2;
+			}
+
 			function renderDraftOptions(options) {
+				draftOptions = options;
+				selectedDraftOptionIndexes = [];
 				draftOptionsElement.replaceChildren();
-				options.forEach(option => {
+				options.forEach((option, index) => {
 					const card = document.createElement('article');
 					card.className = 'draft-option';
+					const header = document.createElement('div');
+					header.className = 'draft-option-header';
+					const checkbox = document.createElement('input');
+					checkbox.className = 'option-checkbox';
+					checkbox.type = 'checkbox';
+					checkbox.setAttribute('aria-label', 'Select ' + option.label);
+					checkbox.addEventListener('change', () => {
+						selectedDraftOptionIndexes = checkbox.checked
+							? [...selectedDraftOptionIndexes, index]
+							: selectedDraftOptionIndexes.filter(selected => selected !== index);
+						renderOptionActions();
+					});
+					card.addEventListener('click', event => {
+						if (event.target === checkbox) return;
+						checkbox.checked = !checkbox.checked;
+						checkbox.dispatchEvent(new Event('change'));
+					});
 					const label = document.createElement('h2');
 					label.textContent = option.label;
 					const text = document.createElement('p');
 					text.textContent = option.draft;
-					const useButton = document.createElement('button');
-					useButton.className = 'secondary';
-					useButton.textContent = 'Use this draft';
-					useButton.addEventListener('click', () => {
-						draft = option.draft;
-						showView('create');
-						showMode('draft');
-						vscode.postMessage({command: 'chooseDraftOption', value: option.draft});
-					});
-					card.append(label, text, useButton);
+					header.append(checkbox, label);
+					card.append(header, text);
 					draftOptionsElement.appendChild(card);
 				});
+				renderOptionActions();
 			}
 
 			function renderImage() {
@@ -974,6 +1088,7 @@ class CodeLoreWorkspacePanel {
 				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'What did you learn or decide?';
 				insightActions.hidden = isDraft;
 				draftActions.hidden = !isDraft;
+				backToOptionsButton.hidden = !isDraft || draftOptions.length === 0;
 				copyButton.hidden = !isDraft;
 			}
 
@@ -1016,9 +1131,13 @@ class CodeLoreWorkspacePanel {
 			altTextInput.addEventListener('blur', () => {
 				vscode.postMessage({command: 'saveImageAltText', value: altTextInput.value});
 			});
-			document.getElementById('back-to-insight').addEventListener('click', () => {
+			document.getElementById('edit-input').addEventListener('click', () => {
 				draft = editor.value;
+				vscode.postMessage({command: 'saveDraft', value: draft});
 				showMode('insight');
+			});
+			backToOptionsButton.addEventListener('click', () => {
+				showView('options');
 			});
 			reviewButton.addEventListener('click', () => {
 				if (mode === 'draft') {
@@ -1033,9 +1152,11 @@ class CodeLoreWorkspacePanel {
 				showView('create');
 				showMode('draft');
 			});
-			document.getElementById('back-to-compose').addEventListener('click', () => {
-				showView('create');
-				showMode('insight');
+			separateDraftsButton.addEventListener('click', () => {
+				vscode.postMessage({command: 'createDraftOptions', drafts: selectedDraftOptions().map(option => option.draft)});
+			});
+			createCombinedDraftButton.addEventListener('click', () => {
+				vscode.postMessage({command: 'combineDraftOptions', options: selectedDraftOptions()});
 			});
 			publishButton.addEventListener('click', () => {
 				if (publishButton.dataset.confirm !== 'true') {
@@ -1089,6 +1210,7 @@ class CodeLoreWorkspacePanel {
 				}
 				if (message.type === 'navigate') {
 					showView(message.view);
+					if (message.mode) showMode(message.mode);
 				}
 			});
 
@@ -1103,7 +1225,10 @@ class CodeLoreWorkspacePanel {
 export function activate(context: vscode.ExtensionContext) {
 
 	const codeloreViewProvider = new CodeLoreViewProvider(context);
-	const codeloreWorkspacePanel = new CodeLoreWorkspacePanel(context);
+	const codeloreWorkspacePanel = new CodeLoreWorkspacePanel(
+		context,
+		() => codeloreViewProvider.refresh(),
+	);
 
 	context.subscriptions.push(
 	vscode.window.registerWebviewViewProvider(

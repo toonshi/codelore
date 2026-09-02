@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import {buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions} from '../post-prompt';
+import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions} from '../post-prompt';
 
 suite('Post prompt builder', () => {
 	test('grounds the draft in the developer\'s work and rejects generic LinkedIn language', () => {
@@ -37,5 +37,16 @@ suite('Post prompt builder', () => {
 			{angle: 'feature', label: 'New feature', draft: 'Built image previews.'},
 			{angle: 'bug', label: 'Problem solved', draft: 'Fixed the picker.'},
 		]);
+	});
+
+	test('creates a fresh combined-story prompt instead of joining drafts', () => {
+		const prompt = buildCombinedDraftPrompt([
+			{angle: 'feature', label: 'New feature', draft: 'Built image previews.'},
+			{angle: 'lesson', label: 'Engineering lesson', draft: 'Kept the controls together.'},
+		], {platform: 'linkedin'});
+
+		assert.match(prompt, /Do not stitch together/);
+		assert.match(prompt, /New feature \(feature\)/);
+		assert.match(prompt, /Never mention pull requests, commits, file counts/);
 	});
 });
