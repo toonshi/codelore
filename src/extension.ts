@@ -529,7 +529,7 @@ class CodeLoreWorkspacePanel {
 				}
 				await updateActivePost(this.context, {insight: writtenInsight ?? ''});
 
-				await this.postStatus(writtenInsight ? 'Writing your LinkedIn draft...' : 'Using your latest commit to write a LinkedIn draft...');
+				await this.postStatus(writtenInsight ? 'Generating story ideas...' : 'Using your latest commit to generate story ideas...');
 				const fallbackDraft = [
 					gitContext?.commitMessage
 						? `Shipped: ${gitContext.commitMessage}`
@@ -542,7 +542,7 @@ class CodeLoreWorkspacePanel {
 					const options = await generateAiPostOptions(writtenInsight, 'linkedin', gitContext);
 					if (options.length) {
 						await this.panel?.webview.postMessage({type: 'draftOptions', options});
-						await this.postStatus('Choose a direction to keep editing.');
+						await this.postStatus('Pick a direction to keep editing.');
 						return;
 					}
 					const draft = await generateAiPostDraft(writtenInsight, 'linkedin', gitContext) ?? fallbackDraft;
@@ -859,16 +859,16 @@ class CodeLoreWorkspacePanel {
 			<div class="app">
 				<main>
 					<section class="view active" id="create">
-						<h1 id="create-title">Share what you learned today</h1>
-						<p id="create-copy">Choose the commits, then add what you learned or decided. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.</p>
-						<textarea id="editor" placeholder="What did you learn or decide?"></textarea>
+						<h1 id="create-title">What’s worth sharing today?</h1>
+						<p id="create-copy">Pick the commits behind it. Add context if it helps.</p>
+						<textarea id="editor" placeholder="A problem you solved, choice you made, or lesson you learned."></textarea>
 						<div id="git-context" hidden>
 							<span id="git-context-summary"></span>
 							<button class="context-link" id="choose-commits" type="button">Choose commits</button>
 						</div>
 						<div id="editor-actions">
 							<div id="insight-actions">
-								<button class="primary" id="generate-draft">Generate LinkedIn draft</button>
+								<button class="primary" id="generate-draft">Generate story ideas</button>
 								<button class="secondary" id="save-reflection">Save insight</button>
 							</div>
 						<div id="draft-actions" hidden>
@@ -1082,10 +1082,10 @@ class CodeLoreWorkspacePanel {
 			function showMode(nextMode) {
 				mode = nextMode;
 				const isDraft = mode === 'draft';
-				createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'Share what you learned today';
-				createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Choose the commits, then add what you learned or decided. CodeLore will turn it into a thoughtful LinkedIn draft when you are ready.';
+				createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'What’s worth sharing today?';
+				createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Pick the commits behind it. Add context if it helps.';
 				editor.value = isDraft ? draft : insight;
-				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'What did you learn or decide?';
+				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'A problem you solved, choice you made, or lesson you learned.';
 				insightActions.hidden = isDraft;
 				draftActions.hidden = !isDraft;
 				backToOptionsButton.hidden = !isDraft || draftOptions.length === 0;

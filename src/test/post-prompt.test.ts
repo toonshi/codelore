@@ -20,6 +20,9 @@ suite('Post prompt builder', () => {
 		assert.match(prompt, /I wanted the upload button/);
 		assert.match(prompt, /"journey", "grateful", "excited"/);
 		assert.match(prompt, /Use no hashtags/);
+		assert.match(prompt, /not an announcement or a changelog/);
+		assert.match(prompt, /Do not force a lesson/);
+		assert.match(prompt, /Every claim must be supported/);
 	});
 
 	test('asks for several grounded angles without Git workflow language', () => {
@@ -28,6 +31,9 @@ suite('Post prompt builder', () => {
 		assert.match(prompt, /two or three distinct post options/);
 		assert.match(prompt, /Never say "merged PR"/);
 		assert.match(prompt, /Return only a JSON array/);
+		assert.match(prompt, /Each option must use a different supported angle/);
+		assert.match(prompt, /Feature means a concrete capability or improvement/);
+		assert.match(prompt, /Use these labels: "Feature", "Problem solved", "Lesson learned", or "Build log"/);
 	});
 
 	test('parses valid draft options and ignores unsupported angles', () => {
