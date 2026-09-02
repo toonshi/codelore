@@ -431,28 +431,27 @@ class CodeLoreWorkspacePanel {
 			}
 
 			if (message.command === 'generateDraft') {
-				const reflection = message.value?.trim()
-					?? this.context.workspaceState.get<string>('codelore.latestReflection');
+				const writtenInsight = message.value?.trim();
+				const latestCommitMessage = await getLatestCommitMessage();
+				const reflection = writtenInsight || latestCommitMessage;
 				if (!reflection) {
-					await this.postStatus('Add a reflection first.');
+					await this.postStatus('Write an insight or make a Git commit first.');
 					return;
 				}
 				await updateActivePost(this.context, {insight: reflection});
 
-				await this.postStatus('Writing your LinkedIn draft...');
-				const latestCommitMessage = await getLatestCommitMessage();
+				await this.postStatus(writtenInsight ? 'Writing your LinkedIn draft...' : 'Using your latest commit to write a LinkedIn draft...');
 				const fallbackDraft = [
 					latestCommitMessage
-						? `Today I worked on ${latestCommitMessage}`
+						? `Today I worked on: ${latestCommitMessage}`
 						: 'Today I learned something while building:',
-					'',
-					reflection,
+					...(writtenInsight ? ['', reflection] : []),
 					'',
 					'#buildinpublic #devjourney #CodeLore',
 				].join('\n');
 
 				try {
-					const draft = await generateAiPostDraft(reflection, 'linkedin', latestCommitMessage) ?? fallbackDraft;
+					const draft = await generateAiPostDraft(reflection, 'linkedin', writtenInsight ? latestCommitMessage : undefined) ?? fallbackDraft;
 					await updateActivePost(this.context, {draft});
 					await this.refresh('Draft ready for your review.');
 				} catch (error) {
