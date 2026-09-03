@@ -2,6 +2,11 @@
 
 All notable changes to the LoreCode extension are documented here.
 
+## [0.1.2] - 2026-09-03
+
+- Refresh the LoreCode icon with the licensed rugged scroll mark.
+- Add icon attribution to the packaged extension.
+
 ## [0.1.1] - 2026-09-03
 
 - Introduce the LoreCode name and scroll icon.
