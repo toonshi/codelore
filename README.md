@@ -65,6 +65,12 @@ LoreCode is an early release. LinkedIn is supported today. X support is planned 
 
 Issues, ideas, and honest feedback are welcome. See the [roadmap](https://github.com/toonshi/codelore/projects) for what is coming next.
 
+## Attribution
+
+The LoreCode extension icon is based on “Scroll Unfurled” by Lorc from
+[Game-icons.net](https://game-icons.net/1x1/lorc/scroll-unfurled.html), used
+under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+
 ## License
 
 [MIT](LICENSE)
