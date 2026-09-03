@@ -1,6 +1,10 @@
 # Change Log
 
-All notable changes to the CodeLore extension are documented here.
+All notable changes to the LoreCode extension are documented here.
+
+## [0.1.1] - 2026-09-03
+
+- Introduce the LoreCode name and scroll icon.
 
 ## [0.1.0] - 2026-09-02
 

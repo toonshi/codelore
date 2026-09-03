@@ -1,8 +1,8 @@
-# CodeLore
+# LoreCode
 
 Turn today’s work into a story worth sharing.
 
-CodeLore is a VS Code extension for developers who build in public. It turns selected Git work and optional context into a few grounded post ideas, then gives you a calm place to refine, preview, and publish one to LinkedIn.
+LoreCode is a VS Code extension for developers who build in public. It turns selected Git work and optional context into a few grounded post ideas, then gives you a calm place to refine, preview, and publish one to LinkedIn.
 
 You own the final words. Nothing is published automatically.
 
@@ -17,17 +17,17 @@ You own the final words. Nothing is published automatically.
 
 ## How it works
 
-1. Open **CodeLore** from the Activity Bar and create a new post.
+1. Open **LoreCode** from the Activity Bar and create a new post.
 2. Choose the commits behind the work.
 3. Add context if it helps, then select **Generate story ideas**.
 4. Pick a direction, make it sound like you, then preview and publish.
 
-When no note is provided, CodeLore stays conservative and generates a factual feature update or build log. Add a real problem, decision, or lesson to unlock richer story directions.
+When no note is provided, LoreCode stays conservative and generates a factual feature update or build log. Add a real problem, decision, or lesson to unlock richer story directions.
 
 ## Privacy and data
 
 - Git context stays local until you explicitly generate ideas.
-- For generation, CodeLore sends selected commit titles, changed file names, and high-level change summaries to the VS Code language model. It does not send raw source code or diffs.
+- For generation, LoreCode sends selected commit titles, changed file names, and high-level change summaries to the VS Code language model. It does not send raw source code or diffs.
 - Your optional note and the text you choose to publish are sent only when you use the relevant action.
 - LinkedIn publishing requires an explicit connection and final publish confirmation.
 - LinkedIn connection references are stored with VS Code Secret Storage. You can disconnect at any time.
@@ -59,7 +59,7 @@ npm run test:unit
 
 ## Status
 
-CodeLore is an early release. LinkedIn is supported today. X support is planned next.
+LoreCode is an early release. LinkedIn is supported today. X support is planned next.
 
 ## Contributing
 

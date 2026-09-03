@@ -16,7 +16,7 @@ type LinkedInStatus = {
 	pictureUrl?: string | null;
 };
 
-type CodeLorePost = {
+type LoreCodePost = {
 	id: string;
 	insight: string;
 	draft: string;
@@ -29,15 +29,15 @@ type CodeLorePost = {
 	commitIds?: string[];
 };
 
-const postsKey = 'codelore.posts';
-const activePostKey = 'codelore.activePostId';
+const postsKey = 'lorecode.posts';
+const activePostKey = 'lorecode.activePostId';
 
-async function getPosts(context: vscode.ExtensionContext): Promise<CodeLorePost[]> {
-	const savedPosts = context.workspaceState.get<CodeLorePost[]>(postsKey);
+async function getPosts(context: vscode.ExtensionContext): Promise<LoreCodePost[]> {
+	const savedPosts = context.workspaceState.get<LoreCodePost[]>(postsKey);
 	if (savedPosts) return savedPosts;
 
-	const insight = context.workspaceState.get<string>('codelore.latestReflection') ?? '';
-	const draft = context.workspaceState.get<string>('codelore.latestDraft') ?? '';
+	const insight = context.workspaceState.get<string>('lorecode.latestReflection') ?? '';
+	const draft = context.workspaceState.get<string>('lorecode.latestDraft') ?? '';
 	if (!insight && !draft) return [];
 
 	const now = Date.now();
@@ -47,12 +47,12 @@ async function getPosts(context: vscode.ExtensionContext): Promise<CodeLorePost[
 	return [migratedPost];
 }
 
-function postTitle(post: CodeLorePost): string {
+function postTitle(post: LoreCodePost): string {
 	const text = (post.draft || post.insight).replaceAll(/\s+/g, ' ').trim();
 	return text.length > 44 ? `${text.slice(0, 44)}…` : text || 'Untitled post';
 }
 
-function postState(post: CodeLorePost): 'published' | 'draft' {
+function postState(post: LoreCodePost): 'published' | 'draft' {
 	return post.publishedAt ? 'published' : 'draft';
 }
 
@@ -63,7 +63,7 @@ function imageContentType(imagePath: string): string | undefined {
 	return undefined;
 }
 
-async function createPost(context: vscode.ExtensionContext): Promise<CodeLorePost> {
+async function createPost(context: vscode.ExtensionContext): Promise<LoreCodePost> {
 	const now = Date.now();
 	const post = {id: randomUUID(), insight: '', draft: '', createdAt: now, updatedAt: now};
 	const posts = await getPosts(context);
@@ -72,7 +72,7 @@ async function createPost(context: vscode.ExtensionContext): Promise<CodeLorePos
 	return post;
 }
 
-async function getActivePost(context: vscode.ExtensionContext): Promise<CodeLorePost> {
+async function getActivePost(context: vscode.ExtensionContext): Promise<LoreCodePost> {
 	const posts = await getPosts(context);
 	const activeId = context.workspaceState.get<string>(activePostKey);
 	const activePost = posts.find((post) => post.id === activeId);
@@ -84,20 +84,20 @@ async function getActivePost(context: vscode.ExtensionContext): Promise<CodeLore
 	return createPost(context);
 }
 
-async function updateActivePost(context: vscode.ExtensionContext, changes: Partial<CodeLorePost>): Promise<CodeLorePost> {
+async function updateActivePost(context: vscode.ExtensionContext, changes: Partial<LoreCodePost>): Promise<LoreCodePost> {
 	const active = await getActivePost(context);
 	const updated = {...active, ...changes, updatedAt: Date.now()};
 	const posts = await getPosts(context);
 	await context.workspaceState.update(postsKey, posts.map((post) => post.id === updated.id ? updated : post));
-	await context.workspaceState.update('codelore.latestReflection', updated.insight);
-	await context.workspaceState.update('codelore.latestDraft', updated.draft);
+	await context.workspaceState.update('lorecode.latestReflection', updated.insight);
+	await context.workspaceState.update('lorecode.latestDraft', updated.draft);
 	return updated;
 }
 
 async function createDraftPostsFromOptions(
 	context: vscode.ExtensionContext,
 	drafts: string[],
-): Promise<CodeLorePost[]> {
+): Promise<LoreCodePost[]> {
 	const active = await getActivePost(context);
 	const posts = await getPosts(context);
 	const now = Date.now();
@@ -114,7 +114,7 @@ async function createDraftPostsFromOptions(
 	}));
 	await context.workspaceState.update(postsKey, [...created, ...posts.filter((post) => post.id !== active.id)]);
 	await context.workspaceState.update(activePostKey, created[0].id);
-	await context.workspaceState.update('codelore.latestDraft', created[0].draft);
+	await context.workspaceState.update('lorecode.latestDraft', created[0].draft);
 	return created;
 }
 
@@ -267,7 +267,7 @@ async function generateAiCombinedDraft(
 }
 
 
-class CodeLoreViewProvider implements vscode.WebviewViewProvider {
+class LoreCodeViewProvider implements vscode.WebviewViewProvider {
 	private view: vscode.WebviewView | undefined;
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
@@ -280,7 +280,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 		webviewView.webview.html = this.getHtml(webviewView.webview);
 		webviewView.webview.onDidReceiveMessage(async (message: {command: string; postId?: string}) => {
 			if (message.command === 'connectLinkedIn') {
-				await vscode.commands.executeCommand('codelore.connectLinkedIn');
+				await vscode.commands.executeCommand('lorecode.connectLinkedIn');
 				await this.refresh();
 				return;
 			}
@@ -292,19 +292,19 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 
 			if (message.command === 'newPost') {
 				await createPost(this.context);
-				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
+				await vscode.commands.executeCommand('lorecode.openWorkspace', 'create');
 				await this.refresh();
 				return;
 			}
 
 			if (message.command === 'openWorkspace') {
-				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
+				await vscode.commands.executeCommand('lorecode.openWorkspace', 'create');
 				return;
 			}
 
 			if (message.command === 'editPost' && message.postId) {
 				await this.context.workspaceState.update(activePostKey, message.postId);
-				await vscode.commands.executeCommand('codelore.openWorkspace', 'create');
+				await vscode.commands.executeCommand('lorecode.openWorkspace', 'create');
 				return;
 			}
 
@@ -334,7 +334,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 			return;
 		}
 
-		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+		const connectionId = await this.context.secrets.get('lorecode.linkedinConnectionId');
 		const posts = await getPosts(this.context);
 		this.view.webview.postMessage({type: 'posts', posts: posts.map((post) => ({id: post.id, title: postTitle(post), updatedAt: post.updatedAt, publishedAt: post.publishedAt, state: postState(post)}))});
 
@@ -344,7 +344,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 				: {connected: false};
 			this.view.webview.postMessage({type: 'linkedinStatus', ...status});
 		} catch (error) {
-			console.error('Error refreshing CodeLore profile:', error);
+			console.error('Error refreshing LoreCode profile:', error);
 			this.view.webview.postMessage({type: 'linkedinStatus', connected: false});
 		}
 	}
@@ -384,7 +384,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 </style>
 </head>
 <body><div class="sidebar-shell">
-	<h1>CodeLore</h1>
+	<h1>LoreCode</h1>
 	<p class="subtitle">Turn today’s work into a story worth sharing.</p>
 	<button class="new-post" data-command="newPost">+ New post</button>
 
@@ -471,7 +471,7 @@ class CodeLoreViewProvider implements vscode.WebviewViewProvider {
 	}
 }
 
-class CodeLoreWorkspacePanel {
+class LoreCodeWorkspacePanel {
 	private panel: vscode.WebviewPanel | undefined;
 	private activeView: 'create' | 'publish' = 'create';
 
@@ -490,8 +490,8 @@ class CodeLoreWorkspacePanel {
 		}
 
 		this.panel = vscode.window.createWebviewPanel(
-			'codelore.workspace',
-			'CodeLore',
+			'lorecode.workspace',
+			'LoreCode',
 			vscode.ViewColumn.Active,
 			{enableScripts: true, retainContextWhenHidden: true},
 		);
@@ -549,9 +549,9 @@ class CodeLoreWorkspacePanel {
 					await updateActivePost(this.context, {draft});
 					await this.refresh('Draft ready for your review.');
 				} catch (error) {
-					console.error('Error generating CodeLore draft:', error);
+					console.error('Error generating LoreCode draft:', error);
 					await updateActivePost(this.context, {draft: fallbackDraft});
-					await this.refresh('Copilot was unavailable, so CodeLore made a simple draft.');
+					await this.refresh('Copilot was unavailable, so LoreCode made a simple draft.');
 				}
 				return;
 			}
@@ -650,7 +650,7 @@ class CodeLoreWorkspacePanel {
 			}
 
 			if (message.command === 'publishPost') {
-				const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+				const connectionId = await this.context.secrets.get('lorecode.linkedinConnectionId');
 				if (!connectionId || !message.value?.trim()) {
 					await this.postStatus('Connect LinkedIn and add text before publishing.');
 					return;
@@ -667,12 +667,12 @@ class CodeLoreWorkspacePanel {
 						: await fetch(`${apiBaseUrl}/linkedin/publish`, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({connectionId, text: message.value.trim()})});
 					const result = (await response.json()) as {published?: boolean; error?: string};
 					if (result.published) await updateActivePost(this.context, {publishedAt: Date.now()});
-					if (!result.published && result.error?.includes('expired')) await this.refresh('Your LinkedIn connection expired. Reconnect from the CodeLore sidebar.');
+					if (!result.published && result.error?.includes('expired')) await this.refresh('Your LinkedIn connection expired. Reconnect from the LoreCode sidebar.');
 					await this.panel?.webview.postMessage({type: 'publishResult', published: Boolean(result.published), message: result.error});
 					await this.postStatus(result.published ? 'Published to LinkedIn.' : result.error ?? 'LinkedIn could not publish this post.');
 				} catch (error) {
 					console.error('Error publishing to LinkedIn:', error);
-					await this.postStatus(error instanceof Error ? error.message : 'CodeLore could not reach LinkedIn. Try again shortly.');
+					await this.postStatus(error instanceof Error ? error.message : 'LoreCode could not reach LinkedIn. Try again shortly.');
 				}
 			}
 		});
@@ -689,7 +689,7 @@ class CodeLoreWorkspacePanel {
 		const selectedCommitIds = post.commitIds ?? commits.slice(0, 1).map((commit) => commit.id);
 		const imageUrl = this.getImagePreviewUrl(post.imagePath);
 		const gitContext = await collectWorkspaceGitContext(selectedCommitIds);
-		const connectionId = await this.context.secrets.get('codelore.linkedinConnectionId');
+		const connectionId = await this.context.secrets.get('lorecode.linkedinConnectionId');
 		let linkedIn: LinkedInStatus = {connected: false};
 		try {
 			linkedIn = connectionId ? await getLinkedInStatus(connectionId) : linkedIn;
@@ -726,7 +726,7 @@ class CodeLoreWorkspacePanel {
 	): Promise<Response> {
 		const contentType = imageContentType(imagePath);
 		if (!contentType) {
-			throw new Error('CodeLore only supports PNG and JPEG images.');
+			throw new Error('LoreCode only supports PNG and JPEG images.');
 		}
 
 		let imageBytes: Uint8Array;
@@ -886,7 +886,7 @@ class CodeLoreWorkspacePanel {
 					</section>
 					<section class="view" id="publish">
 						<h1>Preview & publish</h1>
-						<p>This is the exact text CodeLore will send. Nothing posts automatically.</p>
+						<p>This is the exact text LoreCode will send. Nothing posts automatically.</p>
 						<div class="empty" id="review-content">
 							<div id="review-text"></div>
 							<img id="review-image" alt="Attached image" hidden>
@@ -1230,35 +1230,35 @@ class CodeLoreWorkspacePanel {
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
 
-	const codeloreViewProvider = new CodeLoreViewProvider(context);
-	const codeloreWorkspacePanel = new CodeLoreWorkspacePanel(
+	const lorecodeViewProvider = new LoreCodeViewProvider(context);
+	const lorecodeWorkspacePanel = new LoreCodeWorkspacePanel(
 		context,
-		() => codeloreViewProvider.refresh(),
+		() => lorecodeViewProvider.refresh(),
 	);
 
 	context.subscriptions.push(
 	vscode.window.registerWebviewViewProvider(
-		'codelore.today',
-		codeloreViewProvider,
+		'lorecode.today',
+		lorecodeViewProvider,
 	),
 );
 
 	const openWorkspace = vscode.commands.registerCommand(
-		'codelore.openWorkspace',
+		'lorecode.openWorkspace',
 		(view?: 'create' | 'publish') => {
-			codeloreWorkspacePanel.open(view);
+			lorecodeWorkspacePanel.open(view);
 		},
 	);
 
 	// Use the console to output diagnostic information (console.log) and errors (console.error)
 	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "codelore" is now active!');
+	console.log('Congratulations, your extension "lorecode" is now active!');
 
 	// The command has been defined in the package.json file
 	// Now provide the implementation of the command with registerCommand
 	// The commandId parameter must match the command field in package.json
 	const disposable = vscode.commands.registerCommand(
-		'codelore.reflectOnToday',
+		'lorecode.reflectOnToday',
 		async () => {
 			const reflection = await vscode.window.showInputBox({
 				prompt: 'What did you learn, build or get unstuck today?',
@@ -1270,19 +1270,19 @@ export function activate(context: vscode.ExtensionContext) {
 				return;
 			}
 
-			await context.workspaceState.update('codelore.latestReflection', reflection.trim());
+			await context.workspaceState.update('lorecode.latestReflection', reflection.trim());
 
 			vscode.window.showInformationMessage('Your reflection has been saved. Nice work!');
 		},
 	);
 
 	const viewLatestReflection = vscode.commands.registerCommand(
-		'codelore.viewLatestReflection',
+		'lorecode.viewLatestReflection',
 		async () => {
-			const reflection = context.workspaceState.get<string>('codelore.latestReflection');
+			const reflection = context.workspaceState.get<string>('lorecode.latestReflection');
 
 			if (!reflection) {
-				vscode.window.showInformationMessage('No reflection yet. Start with CodeLore: Reflect on Today.');
+				vscode.window.showInformationMessage('No reflection yet. Start with LoreCode: Reflect on Today.');
 				return;
 			}
 
@@ -1292,9 +1292,9 @@ export function activate(context: vscode.ExtensionContext) {
 
 
 	const copyLatestDraft = vscode.commands.registerCommand(
-		'codelore.copyLatestDraft',
+		'lorecode.copyLatestDraft',
 		async () => {
-			const draft = context.workspaceState.get<string>('codelore.latestDraft');
+			const draft = context.workspaceState.get<string>('lorecode.latestDraft');
 
 			if (!draft) {
 				vscode.window.showInformationMessage('Create a draft before copying one.');
@@ -1310,13 +1310,13 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	const connectLinkedIn = vscode.commands.registerCommand(
-		'codelore.connectLinkedIn',
+		'lorecode.connectLinkedIn',
 		async () => {
-			let connectionId = await context.secrets.get('codelore.linkedinConnectionId');
+			let connectionId = await context.secrets.get('lorecode.linkedinConnectionId');
 
 			if (!connectionId) {
 				connectionId = randomUUID();
-				await context.secrets.store('codelore.linkedinConnectionId', connectionId);
+				await context.secrets.store('lorecode.linkedinConnectionId', connectionId);
 			}
 
 			const connectUrl = vscode.Uri.parse(
@@ -1350,7 +1350,7 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 
 			if (connected) {
-				vscode.window.showInformationMessage('LinkedIn is connected to CodeLore.');
+				vscode.window.showInformationMessage('LinkedIn is connected to LoreCode.');
 				return;
 			}
 
@@ -1361,37 +1361,37 @@ export function activate(context: vscode.ExtensionContext) {
 	);
 
 	const checkLinkedInConnection = vscode.commands.registerCommand(
-		'codelore.checkLinkedInConnection',
+		'lorecode.checkLinkedInConnection',
 		async () => {
-			const connectionId = await context.secrets.get('codelore.linkedinConnectionId');
+			const connectionId = await context.secrets.get('lorecode.linkedinConnectionId');
 
 			if (!connectionId) {
 				vscode.window.showInformationMessage(
-					'LinkedIn is not connected yet. Start with CodeLore: Connect LinkedIn.',
+					'LinkedIn is not connected yet. Start with LoreCode: Connect LinkedIn.',
 				);
 				return;
 			}
 
 			try {
 				if (await isLinkedInConnected(connectionId)) {
-					vscode.window.showInformationMessage('LinkedIn is connected to CodeLore.');
+					vscode.window.showInformationMessage('LinkedIn is connected to LoreCode.');
 					return;
 				}
 
 				vscode.window.showInformationMessage(
-					'LinkedIn is not connected yet. Run CodeLore: Connect LinkedIn to try again.',
+					'LinkedIn is not connected yet. Run LoreCode: Connect LinkedIn to try again.',
 				);
 			} catch (error) {
 				console.error('Error checking LinkedIn connection:', error);
-				vscode.window.showErrorMessage('CodeLore could not check LinkedIn right now.');
+				vscode.window.showErrorMessage('LoreCode could not check LinkedIn right now.');
 			}
 		},
 	);
 
 	const draftPostFromLatestReflection = vscode.commands.registerCommand(
-		'codelore.draftPostFromLatestReflection',
+		'lorecode.draftPostFromLatestReflection',
 		async () => {
-			const reflection = context.workspaceState.get<string>('codelore.latestReflection');
+			const reflection = context.workspaceState.get<string>('lorecode.latestReflection');
 
 			if (!reflection) {
 				vscode.window.showInformationMessage(
@@ -1415,7 +1415,7 @@ export function activate(context: vscode.ExtensionContext) {
 					},
 				],
 				{
-					placeHolder: 'What should CodeLore use for this draft?',
+					placeHolder: 'What should LoreCode use for this draft?',
 				},
 			);
 			if (!contextChoice) {
@@ -1467,7 +1467,7 @@ export function activate(context: vscode.ExtensionContext) {
 				const aiDraft = await vscode.window.withProgress(
 					{
 						location: vscode.ProgressLocation.Notification,
-						title: 'CodeLore is writing your draft...',
+						title: 'LoreCode is writing your draft...',
 					},
 					() => generateAiPostDraft(reflection, platform, gitContext),
 				);
@@ -1476,21 +1476,21 @@ export function activate(context: vscode.ExtensionContext) {
 					draft = aiDraft;
 				} else {
 					vscode.window.showInformationMessage(
-						'Copilot is unavailable, so CodeLore used a simple draft instead.',
+						'Copilot is unavailable, so LoreCode used a simple draft instead.',
 					);
 				};
 
 			} catch (error) {
-				console.error('Error generating CodeLore draft:', error)
+				console.error('Error generating LoreCode draft:', error)
 
 
 			vscode.window.showInformationMessage(
-				'CodeLore used a simple draft because Copilot couldnt respond.',
+				'LoreCode used a simple draft because Copilot couldnt respond.',
 			);
 		}
 
 
-			await context.workspaceState.update('codelore.latestDraft', draft);
+			await context.workspaceState.update('lorecode.latestDraft', draft);
 
 			const document = await vscode.workspace.openTextDocument({
 				content: draft,

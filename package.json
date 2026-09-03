@@ -1,10 +1,10 @@
 {
-  "name": "codelore",
-  "displayName": "CodeLore",
+  "name": "lorecode",
+  "displayName": "LoreCode",
   "description": "Turn today’s work into a story worth sharing.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "techrift",
-  "icon": "resources/codelore.png",
+  "icon": "resources/lorecode.png",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
@@ -33,48 +33,48 @@
   "contributes": {
     "commands": [
       {
-        "command": "codelore.reflectOnToday",
-        "title": "CodeLore: Reflect on Today"
+        "command": "lorecode.reflectOnToday",
+        "title": "LoreCode: Reflect on Today"
       },
       {
-        "command": "codelore.viewLatestReflection",
-        "title": "CodeLore: View Latest Reflection"
+        "command": "lorecode.viewLatestReflection",
+        "title": "LoreCode: View Latest Reflection"
       },
       {
-        "command": "codelore.draftPostFromLatestReflection",
-        "title": "CodeLore: Draft Post from Latest Reflection"
+        "command": "lorecode.draftPostFromLatestReflection",
+        "title": "LoreCode: Draft Post from Latest Reflection"
       },
       {
-        "command": "codelore.copyLatestDraft",
-        "title": "CodeLore: Copy Latest Draft"
+        "command": "lorecode.copyLatestDraft",
+        "title": "LoreCode: Copy Latest Draft"
       },
       {
-        "command": "codelore.connectLinkedIn",
-        "title": "CodeLore: Connect LinkedIn"
+        "command": "lorecode.connectLinkedIn",
+        "title": "LoreCode: Connect LinkedIn"
       },
       {
-        "command": "codelore.checkLinkedInConnection",
-        "title": "CodeLore: Check LinkedIn Connection"
+        "command": "lorecode.checkLinkedInConnection",
+        "title": "LoreCode: Check LinkedIn Connection"
       },
       {
-        "command": "codelore.openWorkspace",
-        "title": "CodeLore: Open Workspace"
+        "command": "lorecode.openWorkspace",
+        "title": "LoreCode: Open Workspace"
       }
     ],
     "viewsContainers": {
   "activitybar": [
     {
-      "id": "codelore",
-      "title": "CodeLore",
-      "icon": "resources/codelore.svg"
+      "id": "lorecode",
+      "title": "LoreCode",
+      "icon": "resources/lorecode.svg"
     }
   ]
 },
 "views": {
-  "codelore": [
+  "lorecode": [
     {
-      "id": "codelore.today",
-      "name": "CodeLore",
+      "id": "lorecode.today",
+      "name": "LoreCode",
       "type": "webview"
     }
   ]

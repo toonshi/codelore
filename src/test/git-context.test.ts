@@ -38,7 +38,7 @@ suite('Git context collector', () => {
 					+ 'd4e5f6\u001fadd image preview\u001f2026-09-01\u001e';
 			}
 			if (args.includes('a1b2c3')) return 'src/extension.ts\n';
-			return 'src/extension.ts\nresources/codelore.svg\n';
+			return 'src/extension.ts\nresources/lorecode.svg\n';
 		});
 
 		assert.deepStrictEqual(commits, [
@@ -51,12 +51,12 @@ suite('Git context collector', () => {
 		const context = await collectCommitContext('/workspace', ['a1b2c3', 'd4e5f6'], async (args) => {
 			if (args[0] === 'log') return args.includes('a1b2c3') ? 'keep image controls together\n' : 'add image preview\n';
 			if (args.includes('a1b2c3')) return 'src/extension.ts\n';
-			return 'src/extension.ts\nresources/codelore.svg\n';
+			return 'src/extension.ts\nresources/lorecode.svg\n';
 		});
 
 		assert.deepStrictEqual(context, {
 			commitMessage: 'keep image controls together · add image preview',
-			changedFiles: ['src/extension.ts', 'resources/codelore.svg'],
+			changedFiles: ['src/extension.ts', 'resources/lorecode.svg'],
 			fileCount: 2,
 			stats: '2 commits selected, 2 files changed',
 			diff: '',

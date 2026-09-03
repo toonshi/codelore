@@ -136,7 +136,7 @@ function bytesToBase64(value) {
     return btoa(binary);
 }
 function connectionResult(success, message) {
-    const title = success ? 'CodeLore is connected' : 'CodeLore could not connect';
+    const title = success ? 'LoreCode is connected' : 'LoreCode could not connect';
     return new Response(`<!doctype html><html><head><title>${title}</title></head><body><h1>${title}</h1><p>${message}</p></body></html>`, {
         headers: { 'content-type': 'text/html; charset=UTF-8' },
         status: success ? 200 : 400,
