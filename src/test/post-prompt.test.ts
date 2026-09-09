@@ -25,6 +25,17 @@ suite('Post prompt builder', () => {
 		assert.match(prompt, /Every claim must be supported/);
 	});
 
+	test('uses saved writing samples as a voice reference without asking to copy them', () => {
+		const prompt = buildDraftPrompt({
+			platform: 'linkedin',
+			voiceExamples: 'I prefer short, direct build notes.\n\nSmall update: fixed the slow path.',
+		});
+
+		assert.match(prompt, /Use the writing samples below as a voice reference/);
+		assert.match(prompt, /without copying sentences/);
+		assert.match(prompt, /Small update: fixed the slow path/);
+	});
+
 	test('keeps Git-only story ideas factual and out of Git workflow language', () => {
 		const prompt = buildDraftOptionsPrompt({platform: 'linkedin'});
 
