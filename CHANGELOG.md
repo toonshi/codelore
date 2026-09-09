@@ -2,6 +2,12 @@
 
 All notable changes to the LoreCode extension are documented here.
 
+## [Unreleased]
+
+- Let authors open a draft in X's composer, generating a shorter draft when needed.
+- Make AI draft-option parsing tolerant of a short preamble and common field names.
+- Add documented, repeatable VSIX packaging and release steps.
+
 ## [0.1.2] - 2026-09-03
 
 - Refresh the LoreCode icon with the licensed rugged scroll mark.

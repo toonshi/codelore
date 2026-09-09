@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import * as path from 'node:path';
 import {promisify} from 'node:util';
 import {collectCommitContext, collectLatestCommitContext, listRecentCommits, type GitCommitContext} from './git-context';
-import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions, type PostDraftOption} from './post-prompt';
+import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, buildXComposerUrl, isXReady, parseDraftOptions, type PostDraftOption} from './post-prompt';
 
 const execFileAsync = promisify(execFile);
 const apiBaseUrl = 'https://codelore-api.codelore.workers.dev';
@@ -409,10 +409,10 @@ class LoreCodeViewProvider implements vscode.WebviewViewProvider {
 				<div class="mark">X</div>
 				<div>
 					<div class="card-title">X</div>
-					<div class="card-copy">Short updates are coming soon.</div>
+					<div class="card-copy">Open a finished draft in X’s composer.</div>
 				</div>
 			</div>
-			<button disabled>Coming soon</button>
+			<button data-command="openWorkspace">Open a draft</button>
 		</div>
 		<p class="privacy">Your work stays local until you choose to publish.</p>
 	</div>
@@ -609,6 +609,31 @@ class LoreCodeWorkspacePanel {
 
 				await vscode.env.clipboard.writeText(draft);
 				await this.postStatus('Draft copied to your clipboard.');
+				return;
+			}
+
+			if (message.command === 'shareToX') {
+				const requestedText = message.value?.trim();
+				if (!requestedText) {
+					await this.postStatus('Create a draft before sharing it to X.');
+					return;
+				}
+
+				const post = await getActivePost(this.context);
+				let xText = requestedText;
+				if (!isXReady(xText)) {
+					await this.postStatus('Making a shorter version for X...');
+					const gitContext = await collectWorkspaceGitContext(post.commitIds);
+					const shorterDraft = await generateAiPostDraft(requestedText, 'x', gitContext);
+					if (!shorterDraft || !isXReady(shorterDraft)) {
+						await this.postStatus('This draft is too long for X. Shorten it to 280 characters, then try again.');
+						return;
+					}
+					xText = shorterDraft;
+				}
+
+				await vscode.env.openExternal(vscode.Uri.parse(buildXComposerUrl(xText)));
+				await this.postStatus(post.imagePath ? 'X opened with your text. Add the image in X before posting.' : 'X opened with your post ready to review.');
 				return;
 			}
 
@@ -905,8 +930,9 @@ class LoreCodeWorkspacePanel {
 						<div class="option-actions"><span id="option-selection-count">No options selected</span><button class="secondary" id="create-separate-drafts" disabled>Create separate drafts</button><button class="primary" id="create-combined-draft" disabled>Create one story</button></div>
 					</section>
 					<div class="footer" id="status"></div>
-						<div class="footer-actions" id="footer-actions">
+					<div class="footer-actions" id="footer-actions">
 						<button class="secondary copy-button" id="copy-draft" hidden><svg viewBox="0 0 16 16" aria-hidden="true"><path fill="currentColor" d="M3 1h8v2H5v8H3V1zm3 4h7v10H6V5zm1 1v8h5V6H7z"/></svg><span>Copy draft</span></button>
+						<button class="secondary" id="share-x" hidden>Open in X</button>
 						<button class="primary" id="review-publish">Preview & publish</button>
 						<button class="primary" id="publish-linkedin" hidden disabled>Publish to LinkedIn</button>
 						</div>
@@ -940,6 +966,7 @@ class LoreCodeWorkspacePanel {
 			const reviewButton = document.getElementById('review-publish');
 			const publishButton = document.getElementById('publish-linkedin');
 			const copyButton = document.getElementById('copy-draft');
+			const shareXButton = document.getElementById('share-x');
 			const selectImageButton = document.getElementById('select-image');
 			const removeImageButton = document.getElementById('remove-image');
 			const gitContextElement = document.getElementById('git-context');
@@ -1079,6 +1106,7 @@ class LoreCodeWorkspacePanel {
 				reviewButton.hidden = view !== 'create';
 				publishButton.hidden = view !== 'publish';
 				copyButton.hidden = view !== 'create' || mode !== 'draft';
+				shareXButton.hidden = view !== 'create' || mode !== 'draft';
 				altTextGroup.hidden = view !== 'publish' || !imageUrl;
 				if (view === 'publish') {
 					renderPreview();
@@ -1088,14 +1116,15 @@ class LoreCodeWorkspacePanel {
 			function showMode(nextMode) {
 				mode = nextMode;
 				const isDraft = mode === 'draft';
-				createTitle.textContent = isDraft ? 'Shape your LinkedIn draft' : 'What’s worth sharing today?';
+				createTitle.textContent = isDraft ? 'Shape your post' : 'What’s worth sharing today?';
 				createCopy.textContent = isDraft ? 'Edit it until it sounds like you. Your original insight is still safe.' : 'Pick the commits behind it. Add context if it helps.';
 				editor.value = isDraft ? draft : insight;
-				editor.placeholder = isDraft ? 'Your LinkedIn draft' : 'A problem you solved, choice you made, or lesson you learned.';
+				editor.placeholder = isDraft ? 'Your post' : 'A problem you solved, choice you made, or lesson you learned.';
 				insightActions.hidden = isDraft;
 				draftActions.hidden = !isDraft;
 				backToOptionsButton.hidden = !isDraft || draftOptions.length === 0;
 				copyButton.hidden = !isDraft;
+				shareXButton.hidden = !isDraft;
 			}
 
 			document.getElementById('save-reflection').addEventListener('click', () => {
@@ -1115,6 +1144,9 @@ class LoreCodeWorkspacePanel {
 			});
 			document.getElementById('copy-draft').addEventListener('click', () => {
 				vscode.postMessage({command: 'copyDraft'});
+			});
+			shareXButton.addEventListener('click', () => {
+				vscode.postMessage({command: 'shareToX', value: editor.value});
 			});
 			document.getElementById('select-image').addEventListener('click', () => {
 				vscode.postMessage({command: 'selectImage'});

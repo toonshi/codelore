@@ -22,6 +22,9 @@ You own the final words. Nothing is published automatically.
 3. Add context if it helps, then select **Generate story ideas**.
 4. Pick a direction, make it sound like you, then preview and publish.
 
+For short updates, choose **Open in X**. LoreCode opens X with the post filled
+in, so you can review it and publish from X without connecting an account.
+
 When no note is provided, LoreCode stays conservative and generates a factual feature update or build log. Add a real problem, decision, or lesson to unlock richer story directions.
 
 ## Privacy and data
@@ -55,11 +58,16 @@ Useful commands:
 ```bash
 npm run compile
 npm run test:unit
+npm run package:vsix
 ```
+
+For packaged extension builds and Marketplace release steps, see
+[the release guide](docs/releasing.md).
 
 ## Status
 
-LoreCode is an early release. LinkedIn is supported today. X support is planned next.
+LoreCode is an early release. LinkedIn can publish directly, and X opens through
+its free composer flow.
 
 ## Contributing
 

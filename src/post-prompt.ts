@@ -14,6 +14,14 @@ export type PostDraftOption = {
 	draft: string;
 };
 
+export function buildXComposerUrl(text: string): string {
+	return `https://x.com/intent/tweet?text=${encodeURIComponent(text)}`;
+}
+
+export function isXReady(text: string): boolean {
+	return Array.from(text).length <= 280;
+}
+
 const angleLabels: Record<DraftOptionAngle, string> = {
 	feature: 'Feature',
 	bug: 'Problem solved',
@@ -73,17 +81,26 @@ export function buildDraftOptionsPrompt(options: DraftPromptOptions): string {
 
 export function parseDraftOptions(response: string): PostDraftOption[] {
 	const source = response.trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
-	try {
-		const value: unknown = JSON.parse(source);
-		if (!Array.isArray(value)) return [];
-		return value
-			.filter(isPostDraftOption)
-			.map((option) => ({...option, label: angleLabels[option.angle], draft: option.draft.trim()}))
-			.filter((option) => option.draft)
-			.slice(0, 3);
-	} catch {
-		return [];
+	const arrayStart = source.indexOf('[');
+	const arrayEnd = source.lastIndexOf(']');
+	const candidates = [source];
+	if (arrayStart !== -1 && arrayEnd > arrayStart) candidates.push(source.slice(arrayStart, arrayEnd + 1));
+
+	for (const candidate of candidates) {
+		try {
+			const value: unknown = JSON.parse(candidate);
+			if (!Array.isArray(value)) continue;
+			const options = value
+				.map(normalizePostDraftOption)
+				.filter((option): option is PostDraftOption => Boolean(option))
+				.slice(0, 3);
+			if (options.length) return options;
+		} catch {
+			continue;
+		}
 	}
+
+	return [];
 }
 
 export function buildCombinedDraftPrompt(
@@ -103,10 +120,26 @@ export function buildCombinedDraftPrompt(
 	].join('\n');
 }
 
-function isPostDraftOption(value: unknown): value is PostDraftOption {
-	if (!value || typeof value !== 'object') return false;
+function normalizePostDraftOption(value: unknown): PostDraftOption | undefined {
+	if (!value || typeof value !== 'object') return undefined;
 	const option = value as Record<string, unknown>;
-	return typeof option.label === 'string'
-		&& typeof option.draft === 'string'
-		&& (option.angle === 'feature' || option.angle === 'bug' || option.angle === 'lesson' || option.angle === 'build-log');
+	const angle = normalizeAngle(option.angle);
+	const draft = typeof option.draft === 'string'
+		? option.draft
+		: typeof option.post === 'string'
+			? option.post
+			: typeof option.content === 'string'
+				? option.content
+				: undefined;
+	if (!angle || !draft?.trim()) return undefined;
+	return {angle, label: angleLabels[angle], draft: draft.trim()};
+}
+
+function normalizeAngle(value: unknown): DraftOptionAngle | undefined {
+	if (typeof value !== 'string') return undefined;
+	const angle = value.trim().toLowerCase().replaceAll('_', '-').replaceAll(' ', '-');
+	if (angle === 'feature' || angle === 'bug' || angle === 'lesson' || angle === 'build-log') return angle;
+	if (angle === 'problem-solved') return 'bug';
+	if (angle === 'lesson-learned') return 'lesson';
+	return undefined;
 }

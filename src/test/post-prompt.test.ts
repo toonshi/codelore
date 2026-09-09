@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, parseDraftOptions} from '../post-prompt';
+import {buildCombinedDraftPrompt, buildDraftOptionsPrompt, buildDraftPrompt, buildXComposerUrl, isXReady, parseDraftOptions} from '../post-prompt';
 
 suite('Post prompt builder', () => {
 	test('grounds the draft in the developer\'s work and rejects generic LinkedIn language', () => {
@@ -36,6 +36,14 @@ suite('Post prompt builder', () => {
 		assert.match(prompt, /Use these labels: "Feature", "Problem solved", "Lesson learned", or "Build log"/);
 	});
 
+	test('builds a safe X composer link and checks the post length', () => {
+		assert.strictEqual(buildXComposerUrl('Build notes & a link'), 'https://x.com/intent/tweet?text=Build%20notes%20%26%20a%20link');
+		assert.strictEqual(isXReady('a'.repeat(280)), true);
+		assert.strictEqual(isXReady('a'.repeat(281)), false);
+		assert.strictEqual(isXReady('👋'.repeat(280)), true);
+		assert.strictEqual(isXReady('👋'.repeat(281)), false);
+	});
+
 	test('unlocks problem and lesson angles when the author adds context', () => {
 		const prompt = buildDraftOptionsPrompt({
 			platform: 'linkedin',
@@ -52,6 +60,23 @@ suite('Post prompt builder', () => {
 		assert.deepStrictEqual(options, [
 			{angle: 'feature', label: 'Feature', draft: 'Built image previews.'},
 			{angle: 'bug', label: 'Problem solved', draft: 'Fixed the picker.'},
+		]);
+	});
+
+	test('parses draft options when the model adds a short preamble', () => {
+		const options = parseDraftOptions('Here are three directions:\n[{"angle":"feature","label":"Feature","draft":"Added a cleaner publishing flow."}]\nPick the one that fits.');
+
+		assert.deepStrictEqual(options, [
+			{angle: 'feature', label: 'Feature', draft: 'Added a cleaner publishing flow.'},
+		]);
+	});
+
+	test('normalizes common model field names and angle labels', () => {
+		const options = parseDraftOptions('[{"angle":"Problem solved","content":"Tracked down why the draft action skipped the options screen."},{"angle":"build_log","post":"Still tightening the flow before release."}]');
+
+		assert.deepStrictEqual(options, [
+			{angle: 'bug', label: 'Problem solved', draft: 'Tracked down why the draft action skipped the options screen.'},
+			{angle: 'build-log', label: 'Build log', draft: 'Still tightening the flow before release.'},
 		]);
 	});
 
