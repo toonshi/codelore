@@ -31,6 +31,12 @@ type LoreCodePost = {
 
 const postsKey = 'lorecode.posts';
 const activePostKey = 'lorecode.activePostId';
+const voiceExamplesKey = 'lorecode.voiceExamples';
+const maxVoiceExamplesLength = 12_000;
+
+function getVoiceExamples(context: vscode.ExtensionContext): string {
+	return context.globalState.get<string>(voiceExamplesKey) ?? '';
+}
 
 async function getPosts(context: vscode.ExtensionContext): Promise<LoreCodePost[]> {
 	const savedPosts = context.workspaceState.get<LoreCodePost[]>(postsKey);
@@ -181,6 +187,7 @@ async function generateAiPostDraft(
 	manualInsight: string | undefined,
 	platform: 'linkedin' | 'x',
 	gitContext?: GitCommitContext,
+	voiceExamples?: string,
 ): Promise<string | undefined> {
 	const [model] = await vscode.lm.selectChatModels({
 		vendor: 'copilot',
@@ -193,7 +200,7 @@ async function generateAiPostDraft(
 
 	const messages = [
 		vscode.LanguageModelChatMessage.User(
-			buildDraftPrompt({manualInsight, platform, gitContext}),
+		buildDraftPrompt({manualInsight, platform, gitContext, voiceExamples}),
 		),
 	];
 
@@ -223,6 +230,7 @@ async function generateAiPostOptions(
 	manualInsight: string | undefined,
 	platform: 'linkedin' | 'x',
 	gitContext?: GitCommitContext,
+	voiceExamples?: string,
 ): Promise<PostDraftOption[]> {
 	const [model] = await vscode.lm.selectChatModels({vendor: 'copilot'});
 	if (!model) return [];
@@ -230,7 +238,7 @@ async function generateAiPostOptions(
 	const cancellation = new vscode.CancellationTokenSource();
 	try {
 		const response = await model.sendRequest(
-			[vscode.LanguageModelChatMessage.User(buildDraftOptionsPrompt({manualInsight, platform, gitContext}))],
+			[vscode.LanguageModelChatMessage.User(buildDraftOptionsPrompt({manualInsight, platform, gitContext, voiceExamples}))],
 			{},
 			cancellation.token,
 		);
@@ -247,6 +255,7 @@ async function generateAiCombinedDraft(
 	manualInsight: string | undefined,
 	platform: 'linkedin' | 'x',
 	gitContext?: GitCommitContext,
+	voiceExamples?: string,
 ): Promise<string | undefined> {
 	const [model] = await vscode.lm.selectChatModels({vendor: 'copilot'});
 	if (!model) return undefined;
@@ -254,7 +263,7 @@ async function generateAiCombinedDraft(
 	const cancellation = new vscode.CancellationTokenSource();
 	try {
 		const response = await model.sendRequest(
-			[vscode.LanguageModelChatMessage.User(buildCombinedDraftPrompt(options, {manualInsight, platform, gitContext}))],
+			[vscode.LanguageModelChatMessage.User(buildCombinedDraftPrompt(options, {manualInsight, platform, gitContext, voiceExamples}))],
 			{},
 			cancellation.token,
 		);
@@ -518,6 +527,40 @@ class LoreCodeWorkspacePanel {
 				return;
 			}
 
+			if (message.command === 'saveVoiceExamples') {
+				const voiceExamples = message.value?.trim() ?? '';
+				if (voiceExamples.length > maxVoiceExamplesLength) {
+					await this.postStatus(`Keep your voice reference under ${maxVoiceExamplesLength.toLocaleString()} characters.`);
+					return;
+				}
+				await this.context.globalState.update(voiceExamplesKey, voiceExamples);
+				await this.refresh(voiceExamples ? 'Voice reference saved. New drafts will use it.' : 'Voice reference cleared.');
+				return;
+			}
+
+			if (message.command === 'importVoiceExamples') {
+				const selection = await vscode.window.showOpenDialog({
+					canSelectFiles: true,
+					canSelectFolders: false,
+					canSelectMany: false,
+					filters: {Text: ['txt', 'md']},
+					openLabel: 'Use as voice reference',
+				});
+				if (!selection?.[0]) return;
+				const content = Buffer.from(await vscode.workspace.fs.readFile(selection[0])).toString('utf8').trim();
+				if (!content) {
+					await this.postStatus('That file does not contain any text.');
+					return;
+				}
+				if (content.length > maxVoiceExamplesLength) {
+					await this.postStatus(`Choose a file under ${maxVoiceExamplesLength.toLocaleString()} characters.`);
+					return;
+				}
+				await this.context.globalState.update(voiceExamplesKey, content);
+				await this.refresh('Voice reference imported. New drafts will use it.');
+				return;
+			}
+
 			if (message.command === 'generateDraft') {
 				const writtenInsight = message.value?.trim();
 				const post = await getActivePost(this.context);
@@ -539,13 +582,13 @@ class LoreCodeWorkspacePanel {
 				].join('\n');
 
 				try {
-					const options = await generateAiPostOptions(writtenInsight, 'linkedin', gitContext);
+					const options = await generateAiPostOptions(writtenInsight, 'linkedin', gitContext, getVoiceExamples(this.context));
 					if (options.length) {
 						await this.panel?.webview.postMessage({type: 'draftOptions', options});
 						await this.postStatus('Pick a direction to keep editing.');
 						return;
 					}
-					const draft = await generateAiPostDraft(writtenInsight, 'linkedin', gitContext) ?? fallbackDraft;
+					const draft = await generateAiPostDraft(writtenInsight, 'linkedin', gitContext, getVoiceExamples(this.context)) ?? fallbackDraft;
 					await updateActivePost(this.context, {draft});
 					await this.refresh('Draft ready for your review.');
 				} catch (error) {
@@ -581,7 +624,7 @@ class LoreCodeWorkspacePanel {
 				const post = await getActivePost(this.context);
 				const gitContext = await collectWorkspaceGitContext(post.commitIds);
 				await this.postStatus('Writing one story from your selected directions...');
-				const draft = await generateAiCombinedDraft(options, message.value?.trim() || post.insight, 'linkedin', gitContext) ?? options[0].draft;
+				const draft = await generateAiCombinedDraft(options, message.value?.trim() || post.insight, 'linkedin', gitContext, getVoiceExamples(this.context)) ?? options[0].draft;
 				await updateActivePost(this.context, {draft});
 				await this.refresh('Combined draft ready for your review.');
 				await this.panel?.webview.postMessage({type: 'navigate', view: 'create', mode: 'draft'});
@@ -728,6 +771,7 @@ class LoreCodeWorkspacePanel {
 			imageUrl,
 			imageName: post.imageName,
 			imageAltText: post.imageAltText,
+			voiceExamples: getVoiceExamples(this.context),
 			gitContext: gitContext && {
 				commitMessage: gitContext.commitMessage,
 				changedFiles: gitContext.changedFiles,
@@ -814,6 +858,12 @@ class LoreCodeWorkspacePanel {
 			p { color: var(--vscode-descriptionForeground); line-height: 1.55; margin: 0 0 22px; }
 			textarea { background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); border-radius: 6px; box-sizing: border-box; color: var(--vscode-input-foreground); font: 14px/1.55 var(--vscode-font-family); min-height: 220px; padding: 14px; resize: vertical; width: 100%; }
 			textarea:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--vscode-focusBorder); }
+			#voice-profile { border: 1px solid var(--vscode-widget-border); border-radius: 6px; margin: 16px 0; padding: 10px 12px; }
+			#voice-profile summary { cursor: pointer; font-weight: 600; }
+			#voice-profile summary span, #voice-profile p { color: var(--vscode-descriptionForeground); font-size: 12px; font-weight: normal; }
+			#voice-examples { min-height: 120px; margin-top: 4px; }
+			.voice-actions { display: flex; gap: 8px; }
+			.voice-actions .secondary { margin-right: 0; }
 			.primary { align-self: flex-end; background: var(--vscode-button-background); border: 0; border-radius: 5px; color: var(--vscode-button-foreground); cursor: pointer; font: inherit; margin-top: 16px; padding: 9px 14px; }
 			.primary:hover { background: var(--vscode-button-hoverBackground); }
 			.published { background: var(--vscode-testing-iconPassed) !important; color: var(--vscode-editor-background) !important; }
@@ -887,6 +937,12 @@ class LoreCodeWorkspacePanel {
 					<section class="view active" id="create">
 						<h1 id="create-title">What’s worth sharing today?</h1>
 						<p id="create-copy">Pick the commits behind it. Add context if it helps.</p>
+						<details id="voice-profile">
+							<summary>Writing voice <span>optional</span></summary>
+							<p>Paste a few posts you wrote, or import a text file. LoreCode uses them as a local reference for future drafts.</p>
+							<textarea id="voice-examples" placeholder="Paste 3–10 past posts that sound like you."></textarea>
+							<div class="voice-actions"><button class="secondary" id="import-voice">Import text file</button><button class="secondary" id="save-voice">Save voice reference</button></div>
+						</details>
 						<textarea id="editor" placeholder="A problem you solved, choice you made, or lesson you learned."></textarea>
 						<div id="git-context" hidden>
 							<span id="git-context-summary"></span>
@@ -952,6 +1008,7 @@ class LoreCodeWorkspacePanel {
 		return `
 			const vscode = acquireVsCodeApi();
 			const editor = document.getElementById('editor');
+			const voiceExamplesInput = document.getElementById('voice-examples');
 			const status = document.getElementById('status');
 			const createTitle = document.getElementById('create-title');
 			const createCopy = document.getElementById('create-copy');
@@ -1130,6 +1187,12 @@ class LoreCodeWorkspacePanel {
 			document.getElementById('save-reflection').addEventListener('click', () => {
 				vscode.postMessage({command: 'saveReflection', value: editor.value});
 			});
+			document.getElementById('save-voice').addEventListener('click', () => {
+				vscode.postMessage({command: 'saveVoiceExamples', value: voiceExamplesInput.value});
+			});
+			document.getElementById('import-voice').addEventListener('click', () => {
+				vscode.postMessage({command: 'importVoiceExamples'});
+			});
 			document.getElementById('generate-draft').addEventListener('click', () => {
 				insight = editor.value;
 				isGenerating = true;
@@ -1217,6 +1280,7 @@ class LoreCodeWorkspacePanel {
 					imageUrl = message.imageUrl || '';
 					imageName = message.imageName || '';
 					altTextInput.value = message.imageAltText || '';
+					voiceExamplesInput.value = message.voiceExamples || '';
 					gitContext = message.gitContext;
 					commits = message.commits || [];
 					selectedCommitIds = message.selectedCommitIds || [];

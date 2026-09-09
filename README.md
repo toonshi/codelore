@@ -11,6 +11,7 @@ You own the final words. Nothing is published automatically.
 - Select the commits that belong to one story.
 - Add a short note when the interesting part is not obvious from Git.
 - Generate grounded story ideas such as a feature update, build log, problem solved, or lesson learned.
+- Save examples of your own writing so new drafts better match your voice.
 - Combine ideas into one story or save separate drafts.
 - Edit, copy, preview, add an optional image, and publish to LinkedIn.
 - Keep a local history of drafts and published posts.
@@ -30,6 +31,7 @@ When no note is provided, LoreCode stays conservative and generates a factual fe
 ## Privacy and data
 
 - Git context stays local until you explicitly generate ideas.
+- Your saved voice reference stays in VS Code's local storage; it is sent to the language model only when you generate a draft.
 - For generation, LoreCode sends selected commit titles, changed file names, and high-level change summaries to the VS Code language model. It does not send raw source code or diffs.
 - Your optional note and the text you choose to publish are sent only when you use the relevant action.
 - LinkedIn publishing requires an explicit connection and final publish confirmation.

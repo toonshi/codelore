@@ -4,6 +4,7 @@ type DraftPromptOptions = {
 	manualInsight?: string;
 	gitContext?: GitCommitContext;
 	platform: 'linkedin' | 'x';
+	voiceExamples?: string;
 };
 
 export type DraftOptionAngle = 'feature' | 'bug' | 'lesson' | 'build-log';
@@ -29,7 +30,7 @@ const angleLabels: Record<DraftOptionAngle, string> = {
 	'build-log': 'Build log',
 };
 
-export function buildDraftPrompt({manualInsight, gitContext, platform}: DraftPromptOptions): string {
+export function buildDraftPrompt({manualInsight, gitContext, platform, voiceExamples}: DraftPromptOptions): string {
 	const platformInstruction = platform === 'x'
 		? 'Write one X post under 280 characters.'
 		: 'Write a LinkedIn update between 45 and 100 words.';
@@ -50,6 +51,9 @@ export function buildDraftPrompt({manualInsight, gitContext, platform}: DraftPro
 		'Do not use generic update templates such as "Just wrapped up", "One challenge was", or "It’s a reminder".',
 		'Do not use these phrases or their close cousins: "journey", "grateful", "excited", "dive deep", "the importance of", "collaboration was key", "making an impact", "not just", or "I look forward to".',
 		'Do not add a call to action. Use no hashtags unless the author explicitly asks for them.',
+		voiceExamples?.trim()
+			? `Use the writing samples below as a voice reference. Match their level of directness, rhythm, and vocabulary without copying sentences or inventing personal details.\n\nVoice reference:\n${voiceExamples.trim()}`
+			: '',
 		'Return only the post text. Do not add a title, commentary, or Markdown code fence.',
 		'',
 		context,
