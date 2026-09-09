@@ -16,7 +16,8 @@
   "homepage": "https://github.com/toonshi/codelore#readme",
   "pricing": "Free",
   "engines": {
-    "vscode": "^1.134.0"
+    "vscode": "^1.134.0",
+    "node": ">=22"
   },
   "categories": [
     "Other",
@@ -62,23 +63,23 @@
       }
     ],
     "viewsContainers": {
-  "activitybar": [
-    {
-      "id": "lorecode",
-      "title": "LoreCode",
-      "icon": "resources/lorecode.svg"
+      "activitybar": [
+        {
+          "id": "lorecode",
+          "title": "LoreCode",
+          "icon": "resources/lorecode.svg"
+        }
+      ]
+    },
+    "views": {
+      "lorecode": [
+        {
+          "id": "lorecode.today",
+          "name": "LoreCode",
+          "type": "webview"
+        }
+      ]
     }
-  ]
-},
-"views": {
-  "lorecode": [
-    {
-      "id": "lorecode.today",
-      "name": "LoreCode",
-      "type": "webview"
-    }
-  ]
-}
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -87,17 +88,19 @@
     "pretest": "npm run compile && npm run lint",
     "test:unit": "npm run compile && mocha out/test/git-context.test.js out/test/post-prompt.test.js --ui tdd --reporter spec",
     "lint": "eslint src",
-    "test": "vscode-test"
+    "test": "vscode-test",
+    "package:vsix": "vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@types/vscode": "^1.134.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "24.x",
-    "typescript-eslint": "^8.61.1",
+    "@types/vscode": "^1.134.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
+    "@vscode/vsce": "3.9.2",
     "eslint": "^10.5.0",
     "typescript": "^6.0.3",
-    "@vscode/test-cli": "^0.0.15",
-    "@vscode/test-electron": "^3.0.0"
+    "typescript-eslint": "^8.61.1"
   },
   "overrides": {
     "diff": "^8.0.4",
